@@ -9,6 +9,7 @@ homepage = "https://github.com/notmagniill/tungsten/"
 repository = "https://github.com/notmagniill/tungsten/"
 
 exclude = [
+    ".github/**",
     "assets",
     "assets/**",
     "examples",
