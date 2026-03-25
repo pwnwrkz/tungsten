@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand};
 use utils::config;
 
 #[derive(Parser)]
-#[command(name = "tungsten", about = "A command line tool to manage Roblox assets similar to Tarmac and Asphalt.")]
+#[command(name = "Tungsten", about = "A command line tool to manage Roblox assets similar to Tarmac and Asphalt.")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,

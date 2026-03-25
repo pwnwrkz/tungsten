@@ -21,22 +21,6 @@ macro_rules! log {
     }};
 }
 
-pub fn info(msg: &str) {
-    log!(info, "{}", msg)
-}
-pub fn success(msg: &str) {
-    log!(success, "{}", msg)
-}
-pub fn warn(msg: &str) {
-    log!(warn, "{}", msg)
-}
-pub fn error(msg: &str) {
-    log!(error, "{}", msg)
-}
-pub fn section(msg: &str) {
-    log!(section, "{}", msg)
-}
-
 pub fn progress(current: usize, total: usize, label: &str) {
     use colored::Colorize;
 
