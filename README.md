@@ -4,4 +4,4 @@
 <p><b>Another command line tool to handle Roblox assets similar to Tarmac and Asphalt.</b></p>
 <p>Designed mainly for images, Tungsten mimics Asphalt and Tarmac closely, with spritesheet packing that Asphalt lacks.</p>
 <p>Originally built for <a href="https://github.com/notmagniill/LucideRoblox">LucideRoblox</a>.</p>
-<h2>To get started, visit the <a href="https://github.com/notmagniill/tungsten/wiki">wiki</a>.</h2>
+<h2>To get started or gather more info about Tungsten, visit the <a href="https://github.com/notmagniill/tungsten/wiki">wiki</a>.</h2>
