@@ -23,16 +23,10 @@ pub struct CodegenConfig {
 }
 
 #[derive(Deserialize)]
-pub struct WebAsset {
-    pub id: u64,
-}
-
-#[derive(Deserialize)]
 pub struct InputConfig {
     pub path: String,
     pub output_path: String,
     pub packable: Option<bool>,
-    pub web: Option<HashMap<String, WebAsset>>,
 }
 
 pub fn load(path: &str) -> Result<Config> {

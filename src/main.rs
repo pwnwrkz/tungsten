@@ -7,7 +7,11 @@ use clap::{Parser, Subcommand};
 use utils::config;
 
 #[derive(Parser)]
-#[command(name = "Tungsten", about = "A command line tool to manage Roblox assets similar to Tarmac and Asphalt.")]
+#[command(
+    name = "tungsten",
+    version,
+    about = "A command line tool to manage Roblox assets similar to Tarmac and Asphalt."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -40,21 +44,15 @@ async fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::Sync { target, api_key } => {
-            match config::load("tungsten.toml") {
-                Ok(config) => commands::sync::run(config, api_key, &target).await,
-                Err(e) => Err(e),
-            }
-        }
-        Commands::Init => {
-            commands::init::run()
-        }
-        Commands::Test { api_key } => {
-            match config::load("tungsten.toml") {
-                Ok(config) => commands::test::run(config, api_key).await,
-                Err(e) => Err(e),
-            }
-        }
+        Commands::Sync { target, api_key } => match config::load("tungsten.toml") {
+            Ok(config) => commands::sync::run(config, api_key, &target).await,
+            Err(e) => Err(e),
+        },
+        Commands::Init => commands::init::run(),
+        Commands::Test { api_key } => match config::load("tungsten.toml") {
+            Ok(config) => commands::test::run(config, api_key).await,
+            Err(e) => Err(e),
+        },
     };
 
     if let Err(e) = result {

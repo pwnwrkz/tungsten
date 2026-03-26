@@ -10,6 +10,7 @@ pub struct InputImage {
     pub image: RgbaImage,
 }
 
+#[allow(dead_code)]
 pub struct PackedImage {
     pub name: String,
     pub sheet_index: usize,

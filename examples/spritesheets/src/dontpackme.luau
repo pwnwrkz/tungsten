@@ -3,12 +3,12 @@
 
 local dontpackme = {
 	["retrowrng"] = {
-		Image = "rbxassetid://79509368374306",
+		Image = "rbxassetid://115708073916937",
 		ImageRectOffset = Vector2.new(0, 0),
 		ImageRectSize = Vector2.new(1024, 247),
 	},
 	["tungstenicon"] = {
-		Image = "rbxassetid://131136979602709",
+		Image = "rbxassetid://110513152831432",
 		ImageRectOffset = Vector2.new(0, 0),
 		ImageRectSize = Vector2.new(512, 512),
 	},
