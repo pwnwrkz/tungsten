@@ -1,8 +1,13 @@
-use anyhow::{Result, Context};
-use image::{RgbaImage, ImageBuffer, GenericImage};
+use anyhow::{Context, Result};
+use image::{GenericImage, ImageBuffer, RgbaImage};
 use std::path::PathBuf;
+
 use crunch::{Item, Rotation};
+use rayon::prelude::*;
+
 use crate::log;
+
+// Types
 
 #[derive(Clone)]
 pub struct InputImage {
@@ -25,75 +30,76 @@ pub struct Spritesheet {
     pub images: Vec<PackedImage>,
 }
 
+// Public API
+
+/// Load every PNG at the given paths in parallel.
+/// Names are relative to `base_path` with the extension stripped.
 pub fn load_images(paths: Vec<PathBuf>, base_path: &str) -> Result<Vec<InputImage>> {
-    let mut images = Vec::new();
+    paths
+        .into_par_iter()
+        .map(|path| {
+            let image = image::open(&path)
+                .with_context(|| format!("Failed to open image \"{}\"", path.display()))?
+                .into_rgba8();
 
-    for path in paths {
-        let image = image::open(&path)
-            .with_context(|| format!("Failed to open image \"{}\"", path.display()))?
-            .into_rgba8();
+            let name = path
+                .strip_prefix(base_path)
+                .unwrap_or(&path)
+                .with_extension("")
+                .to_string_lossy()
+                .replace('\\', "/");
 
-        // Strip base path and extension to get relative name like "48/arrow-up"
-        let name = path
-            .strip_prefix(base_path)
-            .unwrap_or(&path)
-            .with_extension("")
-            .to_string_lossy()
-            .replace('\\', "/")
-            .to_string();
-
-        images.push(InputImage { name, image });
-    }
-
-    Ok(images)
+            Ok(InputImage { name, image })
+        })
+        .collect()
 }
 
+/// Pack images into as many 1024 × 1024 spritesheets as needed.
 pub fn pack(images: Vec<InputImage>) -> Result<Vec<Spritesheet>> {
-    let mut sheets = Vec::new();
+    const SHEET_SIZE: usize = 1024;
+
+    let mut sheets: Vec<Spritesheet> = Vec::new();
     let mut remaining = images;
 
     while !remaining.is_empty() {
-        // Clone remaining so we can recover leftovers if needed
-        let remaining_clone = remaining.clone();
-
-        let items: Vec<Item<InputImage>> = std::mem::take(&mut remaining)
-            .into_iter()
+        let items: Vec<Item<InputImage>> = remaining
+            .iter()
             .map(|img| {
-                let w = img.image.width();
-                let h = img.image.height();
-                Item::new(img, w as usize, h as usize, Rotation::None)
+                Item::new(
+                    img.clone(),
+                    img.image.width() as usize,
+                    img.image.height() as usize,
+                    Rotation::None,
+                )
             })
             .collect();
 
-        let (packed, all_fit) = match crunch::pack(crunch::Rect::of_size(1024, 1024), items) {
-            Ok(packed) => (packed, true),
-            Err(packed) => (packed, false),
-        };
+        let (packed, all_fit) =
+            match crunch::pack(crunch::Rect::of_size(SHEET_SIZE, SHEET_SIZE), items) {
+                Ok(p) => (p, true),
+                Err(p) => (p, false),
+            };
 
-        // Collect names of what was packed
-        let packed_names: std::collections::HashSet<String> = packed
-            .iter()
-            .map(|p| p.data.name.clone())
-            .collect();
+        // Track which names made it onto this sheet so we can find leftovers.
+        let packed_names: std::collections::HashSet<&str> =
+            packed.iter().map(|p| p.data.name.as_str()).collect();
 
-        // Draw the spritesheet
-        let mut sheet_image: RgbaImage = ImageBuffer::from_pixel(
-            1024, 1024,
-            image::Rgba([0, 0, 0, 0])
-        );
-        let mut packed_images = Vec::new();
+        // Composite the sheet image.
+        let mut sheet_image: RgbaImage =
+            ImageBuffer::from_pixel(SHEET_SIZE as u32, SHEET_SIZE as u32, image::Rgba([0, 0, 0, 0]));
 
-        for crunch::PackedItem { data: img, rect } in packed {
-            let x = rect.x as u32;
-            let y = rect.y as u32;
+        let sheet_index = sheets.len();
+        let mut packed_images = Vec::with_capacity(packed.len());
 
+        for crunch::PackedItem { data: img, rect } in &packed {
+            let (x, y) = (rect.x as u32, rect.y as u32);
             sheet_image
                 .copy_from(&img.image, x, y)
                 .with_context(|| format!("Failed to copy \"{}\" onto spritesheet", img.name))?;
 
             packed_images.push(PackedImage {
-                name: img.name,
-                sheet_index: sheets.len(),
+                name: img.name.clone(),
+                sheet_index,
                 x,
                 y,
                 width: img.image.width(),
@@ -106,19 +112,23 @@ pub fn pack(images: Vec<InputImage>) -> Result<Vec<Spritesheet>> {
             images: packed_images,
         });
 
-        // If not everything fit, recover leftovers from our clone
-        if !all_fit {
-            remaining = remaining_clone
-                .into_iter()
-                .filter(|img| !packed_names.contains(&img.name))
-                .collect();
-
-            log!(warn, "{} image(s) didn't fit, packing into another spritesheet...", remaining.len());
+        if all_fit {
+            break;
         }
+
+        // Keep only the images that didn't make it onto this sheet.
+        remaining.retain(|img| !packed_names.contains(img.name.as_str()));
+        log!(
+            warn,
+            "{} image(s) didn't fit, packing into another spritesheet...",
+            remaining.len()
+        );
     }
 
     Ok(sheets)
 }
+
+// Tests
 
 #[cfg(test)]
 mod tests {
@@ -126,39 +136,27 @@ mod tests {
 
     #[test]
     fn test_pack_single_image() {
-        // Create a simple 48x48 test image in memory
-        let test_image = image::RgbaImage::new(48, 48);
-        
         let inputs = vec![InputImage {
             name: "test-icon".to_string(),
-            image: test_image,
+            image: RgbaImage::new(48, 48),
         }];
 
         let result = pack(inputs).unwrap();
-        
-        // Should produce exactly one spritesheet
         assert_eq!(result.len(), 1);
-        
-        // Should contain our image
         assert_eq!(result[0].images.len(), 1);
         assert_eq!(result[0].images[0].name, "test-icon");
-        
-        // Sheet should be 1024x1024
         assert_eq!(result[0].image.width(), 1024);
         assert_eq!(result[0].image.height(), 1024);
     }
 
     #[test]
     fn test_pack_preserves_dimensions() {
-        let test_image = image::RgbaImage::new(48, 48);
-        
         let inputs = vec![InputImage {
             name: "test-icon".to_string(),
-            image: test_image,
+            image: RgbaImage::new(48, 48),
         }];
 
         let result = pack(inputs).unwrap();
-        
         assert_eq!(result[0].images[0].width, 48);
         assert_eq!(result[0].images[0].height, 48);
     }

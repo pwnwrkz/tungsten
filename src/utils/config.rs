@@ -1,4 +1,4 @@
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
 
@@ -33,8 +33,6 @@ pub fn load(path: &str) -> Result<Config> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Could not read \"{}\" — make sure it exists in your project root", path))?;
 
-    let config: Config = toml::from_str(&content)
-        .with_context(|| format!("Failed to parse \"{}\" — check for missing or invalid fields", path))?;
-
-    Ok(config)
+    toml::from_str(&content)
+        .with_context(|| format!("Failed to parse \"{}\" — check for missing or invalid fields", path))
 }

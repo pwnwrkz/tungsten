@@ -2277,7 +2277,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tungsten-cli"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -2286,6 +2286,7 @@ dependencies = [
  "glob",
  "hex",
  "image",
+ "rayon",
  "reqwest",
  "serde",
  "serde_json",

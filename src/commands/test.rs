@@ -4,13 +4,18 @@ use crate::log;
 
 pub async fn run(config: Config, api_key: Option<String>) -> Result<()> {
     let mut warnings: u32 = 0;
-    
+
     log!(section, "Testing Tungsten configuration");
 
-    // Check creator
+    // Creator
     match config.creator.creator_type.as_str() {
         "user" | "group" => {
-            log!(success, "Creator type \"{}\" with ID {} is valid", config.creator.creator_type, config.creator.id);
+            log!(
+                success,
+                "Creator type \"{}\" with ID {} is valid",
+                config.creator.creator_type,
+                config.creator.id
+            );
         }
         other => {
             log!(error, "Invalid creator type \"{}\" — must be \"user\" or \"group\"", other);
@@ -18,7 +23,7 @@ pub async fn run(config: Config, api_key: Option<String>) -> Result<()> {
         }
     }
 
-    // Check inputs
+    // Inputs
     if config.inputs.is_empty() {
         log!(error, "No inputs defined in tungsten.toml");
         return Ok(());
@@ -41,25 +46,25 @@ pub async fn run(config: Config, api_key: Option<String>) -> Result<()> {
         }
     }
 
-    // Check API key if provided
-    if let Some(key) = api_key {
-        log!(info, "Testing API key...");
-        // Just check it's not empty
-        if key.is_empty() {
-            log!(error, "API key is empty");
-        } else {
+    // API key
+    match api_key.as_deref() {
+        Some("") | None => {
+            log!(warn, "No API key provided — skipping API key check");
+            warnings += 1;
+        }
+        Some(_) => {
             log!(success, "API key looks valid (not empty)");
             log!(info, "Note: A real upload test is not performed — run sync to verify fully");
         }
-    } else {
-        log!(warn, "No API key provided — skipping API key check");
     }
 
+    // Summary
     log!(section, "Done");
+
     if warnings == 0 {
         log!(success, "Configuration looks good!");
     } else {
-        log!(warn, "Configuration is okay, but errors were found.");
+        log!(warn, "Configuration is okay, but {} warning(s) were found.", warnings);
     }
 
     Ok(())

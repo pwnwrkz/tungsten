@@ -1,6 +1,6 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-// The main request body sent when uploading
+/// Request body sent when uploading an asset.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UploadRequest {
@@ -35,7 +35,7 @@ pub struct GroupCreator {
     pub group_id: String,
 }
 
-// Response from polling the operation
+/// Response from polling an upload operation.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Operation {

@@ -6,17 +6,12 @@ macro_rules! log {
         use colored::Colorize;
         let msg = format!($($arg)*);
         match stringify!($level) {
-            "info" => println!("{} {}", "∙".white().bold(), msg.white()),
+            "info"    => println!("{} {}", "∙".white().bold(), msg.white()),
             "success" => println!("{} {}", "✓".green().bold(), msg.green()),
-            "warn" => println!("{} {}", "⚠".yellow().bold(), msg.yellow()),
-            "error" => println!("{} {}", "✗".red().bold(), msg.red()),
-            "section" => println!(
-                "\n{} {}{}",
-                "──".cyan().bold(),
-                msg.cyan().bold(),
-                " ──".cyan().bold()
-            ),
-            _ => println!("{}", msg),
+            "warn"    => println!("{} {}", "⚠".yellow().bold(), msg.yellow()),
+            "error"   => println!("{} {}", "✗".red().bold(), msg.red()),
+            "section" => println!("\n{} {}{}", "──".cyan().bold(), msg.cyan().bold(), " ──".cyan().bold()),
+            _         => println!("{}", msg),
         }
     }};
 }
@@ -24,23 +19,25 @@ macro_rules! log {
 pub fn progress(current: usize, total: usize, label: &str) {
     use colored::Colorize;
 
-    let bar_width = 30;
-    let filled = ((current as f32 / total as f32) * bar_width as f32).floor() as usize;
-    let empty = bar_width - filled;
-    let percent = ((current as f32 / total as f32) * 100.0).floor() as usize;
+    const BAR_WIDTH: usize = 30;
+
+    let ratio    = current as f32 / total as f32;
+    let filled   = (ratio * BAR_WIDTH as f32).floor() as usize;
+    let empty    = BAR_WIDTH - filled;
+    let percent  = (ratio * 100.0).floor() as usize;
 
     let bar = format!(
         "{}{}",
-        "█".repeat(filled).green().bold().to_string(),
-        "░".repeat(empty).dimmed().to_string(),
+        "█".repeat(filled).green().bold(),
+        "░".repeat(empty).dimmed(),
     );
 
     let line = format!(
         "[{}] {} {}/{} {:<40}",
         bar,
         format!("{}%", percent).cyan().bold(),
-        format!("{}", current).bold(),
-        format!("{}", total).bold(),
+        current.to_string().bold(),
+        total.to_string().bold(),
         label.dimmed(),
     );
 

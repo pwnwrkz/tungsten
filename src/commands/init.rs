@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use crate::log;
 
 const DEFAULT_CONFIG: &str = r#"[creator]
@@ -18,7 +18,8 @@ packable = false
 pub fn run() -> Result<()> {
     if std::path::Path::new("tungsten.toml").exists() {
         bail!(
-            "tungsten.toml already exists in this directory\n  Hint: Delete it first if you want to reinitialize"
+            "tungsten.toml already exists in this directory\n  \
+             Hint: Delete it first if you want to reinitialize"
         );
     }
 
@@ -26,7 +27,11 @@ pub fn run() -> Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to create tungsten.toml: {}", e))?;
 
     log!(success, "Created tungsten.toml");
-    log!(info, "Edit it to set your creator ID and input paths, then run \"tungsten sync --target roblox --api-key YOUR_KEY\"");
+    log!(
+        info,
+        "Edit it to set your creator ID and input paths, then run \
+         \"tungsten sync --target roblox --api-key YOUR_KEY\""
+    );
 
     Ok(())
 }
