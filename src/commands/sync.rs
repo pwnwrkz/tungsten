@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use glob::glob;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -7,15 +7,17 @@ use tokio::task::JoinSet;
 use crate::api::roblox::{Creator, GroupCreator, UserCreator};
 use crate::api::upload::RobloxClient;
 use crate::core::codegen::{self, CodegenEntry};
-use crate::core::lockfile::{hash_image, Lockfile};
+use crate::core::lockfile::{Lockfile, hash_image};
 use crate::core::pack;
-use crate::utils::config::Config;
-use crate::utils::logger::progress;
 use crate::log;
+use crate::utils::config::Config;
+use crate::utils::env::resolve_api_key;
+use crate::utils::logger::progress;
 
 // Entry point
 
 pub async fn run(config: Config, api_key: Option<String>, target: &str) -> Result<()> {
+    let api_key = resolve_api_key(api_key);
     let mut errors: u32 = 0;
 
     let mut lockfile = Lockfile::load().context("Failed to load lockfile")?;
@@ -23,8 +25,12 @@ pub async fn run(config: Config, api_key: Option<String>, target: &str) -> Resul
     let client: Option<Arc<RobloxClient>> = if target == "roblox" {
         let key = api_key.as_deref().ok_or_else(|| {
             anyhow::anyhow!(
-                "Missing --api-key flag\n  \
-                 Hint: Generate an API key at https://create.roblox.com/credentials \
+                "No API key provided\n  \
+                 You can provide an API key for Tungsten in multiple ways:\n  \
+                 1. Pass it as a flag: tungsten sync --target roblox --api-key YOUR_KEY\n  \
+                 2. Store it in a .env file named tungsten_api_key.env with the key API_KEY\n  \
+                 3. Set it in your system environment variables with the name TUNGSTEN_GLOBAL_APIKEY\n  \
+                 If you don't have one, generate an API key at https://create.roblox.com/credentials \
                  with \"Assets: Read & Write\" permissions"
             )
         })?;
@@ -64,10 +70,12 @@ pub async fn run(config: Config, api_key: Option<String>, target: &str) -> Resul
 
         // Resolve glob
         let paths: Vec<PathBuf> = glob(&input.path)
-            .with_context(|| format!(
-                "Invalid glob pattern \"{}\"\n  Hint: Example: path = \"assets/**/*.png\"",
-                input.path
-            ))?
+            .with_context(|| {
+                format!(
+                    "Invalid glob pattern \"{}\"\n  Hint: Example: path = \"assets/**/*.png\"",
+                    input.path
+                )
+            })?
             .filter_map(|entry| match entry {
                 Ok(p) if p.extension().map(|e| e == "png").unwrap_or(false) => Some(p),
                 Ok(_) => None,
@@ -86,7 +94,8 @@ pub async fn run(config: Config, api_key: Option<String>, target: &str) -> Resul
         log!(info, "Found {} PNG files", paths.len());
 
         // Load images
-        let base_path = input.path
+        let base_path = input
+            .path
             .split('*')
             .next()
             .unwrap_or("")
@@ -163,7 +172,7 @@ async fn process_packed(
 
     log!(info, "Packing into spritesheets...");
     let spritesheets = match pack::pack(images) {
-        Ok(s)  => s,
+        Ok(s) => s,
         Err(e) => {
             log!(warn, "Failed to pack images for \"{}\": {}", input_name, e);
             return 1;
@@ -176,7 +185,7 @@ async fn process_packed(
 
     for (idx, sheet) in spritesheets.iter().enumerate() {
         let png_bytes = match encode_png(&sheet.image) {
-            Ok(b)  => b,
+            Ok(b) => b,
             Err(e) => {
                 log!(warn, "Failed to encode spritesheet #{}: {}", idx + 1, e);
                 errors += 1;
@@ -189,16 +198,22 @@ async fn process_packed(
         let asset_id = match client {
             Some(c) => {
                 if let Some(cached) = lockfile.get(input_name, &hash) {
-                    log!(info, "Spritesheet #{} unchanged, skipping (rbxassetid://{})", idx + 1, cached);
+                    log!(
+                        info,
+                        "Spritesheet #{} unchanged, skipping (rbxassetid://{})",
+                        idx + 1,
+                        cached
+                    );
                     cached
                 } else {
                     log!(info, "Uploading spritesheet #{}...", idx + 1);
-                    match c.upload(
-                        &format!("tungsten_{}_{}", input_name, idx),
-                        png_bytes,
-                        creator.clone(),
-                    )
-                    .await
+                    match c
+                        .upload(
+                            &format!("tungsten_{}_{}", input_name, idx),
+                            png_bytes,
+                            creator.clone(),
+                        )
+                        .await
                     {
                         Ok(id) => {
                             lockfile.set(input_name, hash, id);
@@ -206,7 +221,12 @@ async fn process_packed(
                                 log!(warn, "Failed to save lockfile: {}", e);
                                 errors += 1;
                             }
-                            log!(success, "Spritesheet #{} uploaded → rbxassetid://{}", idx + 1, id);
+                            log!(
+                                success,
+                                "Spritesheet #{} uploaded → rbxassetid://{}",
+                                idx + 1,
+                                id
+                            );
                             id
                         }
                         Err(e) => {
@@ -218,7 +238,11 @@ async fn process_packed(
                 }
             }
             None => {
-                log!(info, "Dry run: skipping upload for spritesheet #{}", idx + 1);
+                log!(
+                    info,
+                    "Dry run: skipping upload for spritesheet #{}",
+                    idx + 1
+                );
                 0
             }
         };
@@ -233,7 +257,14 @@ async fn process_packed(
         }
     }
 
-    write_codegen(codegen_entries, input_name, output_path, codegen_style, strip_extension, &mut errors);
+    write_codegen(
+        codegen_entries,
+        input_name,
+        output_path,
+        codegen_style,
+        strip_extension,
+        &mut errors,
+    );
     errors
 }
 
@@ -254,11 +285,11 @@ async fn process_individual(
 
     // ── Encode (CPU-bound, serial here but fast in practice) ─────────────────
     struct Pending {
-        name:   String,
-        width:  u32,
+        name: String,
+        width: u32,
         height: u32,
-        bytes:  Vec<u8>,
-        hash:   String,
+        bytes: Vec<u8>,
+        hash: String,
     }
 
     let mut pending: Vec<Pending> = Vec::with_capacity(total);
@@ -268,8 +299,8 @@ async fn process_individual(
             Ok(bytes) => {
                 let hash = hash_image(&bytes);
                 pending.push(Pending {
-                    name:   img.name,
-                    width:  img.image.width(),
+                    name: img.name,
+                    width: img.image.width(),
                     height: img.image.height(),
                     bytes,
                     hash,
@@ -283,17 +314,17 @@ async fn process_individual(
     }
 
     // Cache hits vs. uploads
-    let mut codegen_entries: Vec<CodegenEntry>  = Vec::with_capacity(pending.len());
+    let mut codegen_entries: Vec<CodegenEntry> = Vec::with_capacity(pending.len());
     let mut upload_tasks: JoinSet<Result<(String, u32, u32, u64, String)>> = JoinSet::new();
 
     for p in pending {
         // Cache hit — no network needed.
         if let Some(cached_id) = lockfile.get(input_name, &p.hash) {
             codegen_entries.push(CodegenEntry {
-                name:        p.name,
-                asset_id:    cached_id,
+                name: p.name,
+                asset_id: cached_id,
                 rect_offset: (0, 0),
-                rect_size:   (p.width, p.height),
+                rect_size: (p.width, p.height),
             });
             continue;
         }
@@ -301,17 +332,17 @@ async fn process_individual(
         // Dry run — no client.
         let Some(c) = client else {
             codegen_entries.push(CodegenEntry {
-                name:        p.name,
-                asset_id:    0,
+                name: p.name,
+                asset_id: 0,
                 rect_offset: (0, 0),
-                rect_size:   (p.width, p.height),
+                rect_size: (p.width, p.height),
             });
             continue;
         };
 
         // Spawn upload task.
-        let c_arc        = Arc::clone(c);
-        let creator_own  = creator.clone();
+        let c_arc = Arc::clone(c);
+        let creator_own = creator.clone();
 
         upload_tasks.spawn(async move {
             let id = c_arc
@@ -323,7 +354,7 @@ async fn process_individual(
     }
 
     // Collect results
-    let upload_total  = upload_tasks.len();
+    let upload_total = upload_tasks.len();
     let mut completed = 0usize;
 
     while let Some(res) = upload_tasks.join_next().await {
@@ -339,9 +370,9 @@ async fn process_individual(
                 progress(completed, upload_total, &name);
                 codegen_entries.push(CodegenEntry {
                     name,
-                    asset_id:    id,
+                    asset_id: id,
                     rect_offset: (0, 0),
-                    rect_size:   (width, height),
+                    rect_size: (width, height),
                 });
             }
             Ok(Err(e)) => {
@@ -362,7 +393,14 @@ async fn process_individual(
         println!();
     }
 
-    write_codegen(codegen_entries, input_name, output_path, codegen_style, strip_extension, &mut errors);
+    write_codegen(
+        codegen_entries,
+        input_name,
+        output_path,
+        codegen_style,
+        strip_extension,
+        &mut errors,
+    );
     errors
 }
 
@@ -405,7 +443,12 @@ fn write_codegen(
     match codegen::generate(entries, &table_name, style, strip_extension, output_path) {
         Ok(()) => log!(success, "Codegen written to \"{}\"", output_path),
         Err(e) => {
-            log!(warn, "Failed to write codegen for \"{}\": {}", input_name, e);
+            log!(
+                warn,
+                "Failed to write codegen for \"{}\": {}",
+                input_name,
+                e
+            );
             *errors += 1;
         }
     }

@@ -31,9 +31,9 @@ impl Lockfile {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Could not read \"{}\"", LOCKFILE_PATH))?;
 
-        toml::from_str(&content).with_context(|| {
-            "Failed to parse lockfile — it may be corrupted, try deleting it and re-running"
-        })
+        toml::from_str(&content).with_context(
+            || "Failed to parse lockfile — it may be corrupted, try deleting it and re-running",
+        )
     }
 
     pub fn save(&self) -> Result<()> {

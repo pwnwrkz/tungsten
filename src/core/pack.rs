@@ -85,8 +85,11 @@ pub fn pack(images: Vec<InputImage>) -> Result<Vec<Spritesheet>> {
             packed.iter().map(|p| p.data.name.as_str()).collect();
 
         // Composite the sheet image.
-        let mut sheet_image: RgbaImage =
-            ImageBuffer::from_pixel(SHEET_SIZE as u32, SHEET_SIZE as u32, image::Rgba([0, 0, 0, 0]));
+        let mut sheet_image: RgbaImage = ImageBuffer::from_pixel(
+            SHEET_SIZE as u32,
+            SHEET_SIZE as u32,
+            image::Rgba([0, 0, 0, 0]),
+        );
 
         let sheet_index = sheets.len();
         let mut packed_images = Vec::with_capacity(packed.len());

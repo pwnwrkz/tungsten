@@ -34,7 +34,7 @@ pub fn generate(
 
     match style {
         "nested" => generate_nested(&entries, strip_extension, &mut lines, table_name),
-        _        => generate_flat(&entries, strip_extension, &mut lines, table_name),
+        _ => generate_flat(&entries, strip_extension, &mut lines, table_name),
     }
 
     lines.push(String::new());
@@ -57,7 +57,11 @@ fn strip_ext(name: &str) -> &str {
 }
 
 fn entry_name<'a>(entry: &'a CodegenEntry, strip_extension: bool) -> &'a str {
-    if strip_extension { strip_ext(&entry.name) } else { &entry.name }
+    if strip_extension {
+        strip_ext(&entry.name)
+    } else {
+        &entry.name
+    }
 }
 
 // Flat style
@@ -90,7 +94,10 @@ fn generate_flat(
 
 // Nested style
 
-fn build_tree<'a>(entries: &'a [CodegenEntry], strip_extension: bool) -> BTreeMap<String, TreeNode<'a>> {
+fn build_tree<'a>(
+    entries: &'a [CodegenEntry],
+    strip_extension: bool,
+) -> BTreeMap<String, TreeNode<'a>> {
     let mut root: BTreeMap<String, TreeNode<'a>> = BTreeMap::new();
 
     for entry in entries {
@@ -117,14 +124,17 @@ fn build_tree<'a>(entries: &'a [CodegenEntry], strip_extension: bool) -> BTreeMa
 }
 
 fn write_tree(tree: &BTreeMap<String, TreeNode>, lines: &mut Vec<String>, depth: usize) {
-    let indent       = "\t".repeat(depth);
+    let indent = "\t".repeat(depth);
     let inner_indent = "\t".repeat(depth + 1);
 
     for (key, node) in tree {
         match node {
             TreeNode::Leaf(entry) => {
                 lines.push(format!("{}[\"{}\"] = {{", indent, key));
-                lines.push(format!("{}Image = \"rbxassetid://{}\",", inner_indent, entry.asset_id));
+                lines.push(format!(
+                    "{}Image = \"rbxassetid://{}\",",
+                    inner_indent, entry.asset_id
+                ));
                 lines.push(format!(
                     "{}ImageRectOffset = Vector2.new({}, {}),",
                     inner_indent, entry.rect_offset.0, entry.rect_offset.1

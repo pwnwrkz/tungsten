@@ -1,6 +1,6 @@
-use anyhow::Result;
-use crate::utils::config::Config;
 use crate::log;
+use crate::utils::config::Config;
+use anyhow::Result;
 
 pub async fn run(config: Config, api_key: Option<String>) -> Result<()> {
     let mut warnings: u32 = 0;
@@ -18,7 +18,11 @@ pub async fn run(config: Config, api_key: Option<String>) -> Result<()> {
             );
         }
         other => {
-            log!(error, "Invalid creator type \"{}\" — must be \"user\" or \"group\"", other);
+            log!(
+                error,
+                "Invalid creator type \"{}\" — must be \"user\" or \"group\"",
+                other
+            );
             return Ok(());
         }
     }
@@ -42,7 +46,12 @@ pub async fn run(config: Config, api_key: Option<String>) -> Result<()> {
             log!(warn, "No PNG files matched \"{}\"", input.path);
             warnings += 1;
         } else {
-            log!(success, "Found {} PNG file(s) for \"{}\"", paths.len(), name);
+            log!(
+                success,
+                "Found {} PNG file(s) for \"{}\"",
+                paths.len(),
+                name
+            );
         }
     }
 
@@ -54,7 +63,10 @@ pub async fn run(config: Config, api_key: Option<String>) -> Result<()> {
         }
         Some(_) => {
             log!(success, "API key looks valid (not empty)");
-            log!(info, "Note: A real upload test is not performed — run sync to verify fully");
+            log!(
+                info,
+                "Note: A real upload test is not performed — run sync to verify fully"
+            );
         }
     }
 
@@ -64,7 +76,11 @@ pub async fn run(config: Config, api_key: Option<String>) -> Result<()> {
     if warnings == 0 {
         log!(success, "Configuration looks good!");
     } else {
-        log!(warn, "Configuration is okay, but {} warning(s) were found.", warnings);
+        log!(
+            warn,
+            "Configuration is okay, but {} warning(s) were found.",
+            warnings
+        );
     }
 
     Ok(())

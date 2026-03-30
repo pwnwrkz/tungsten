@@ -1,5 +1,5 @@
-use anyhow::{bail, Context, Result};
-use reqwest::{multipart, Client};
+use anyhow::{Context, Result, bail};
+use reqwest::{Client, multipart};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::Mutex;

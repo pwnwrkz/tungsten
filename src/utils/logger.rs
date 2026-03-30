@@ -21,10 +21,10 @@ pub fn progress(current: usize, total: usize, label: &str) {
 
     const BAR_WIDTH: usize = 30;
 
-    let ratio    = current as f32 / total as f32;
-    let filled   = (ratio * BAR_WIDTH as f32).floor() as usize;
-    let empty    = BAR_WIDTH - filled;
-    let percent  = (ratio * 100.0).floor() as usize;
+    let ratio = current as f32 / total as f32;
+    let filled = (ratio * BAR_WIDTH as f32).floor() as usize;
+    let empty = BAR_WIDTH - filled;
+    let percent = (ratio * 100.0).floor() as usize;
 
     let bar = format!(
         "{}{}",
