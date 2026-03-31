@@ -5,7 +5,7 @@ version = "0.1.3"
 edition = "2024"
 license-file = "LICENSE"
 readme = "README.md"
-homepage = "https://github.com/pwnwrkz/tungsten/"
+homepage = "https://pwnwrkz.github.io/tungsten-docs"
 repository = "https://github.com/pwnwrkz/tungsten/"
 
 exclude = [
