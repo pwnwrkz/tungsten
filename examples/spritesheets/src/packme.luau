@@ -4,19 +4,19 @@
 local packme = {
 	["48"] = {
 		["dotgrid"] = {
-			Image = "rbxassetid://97501789022692",
+			Image = "rbxassetid://137460629171781",
 			ImageRectOffset = Vector2.new(600, 0),
 			ImageRectSize = Vector2.new(240, 240),
 		},
 	},
 	["67"] = {
 		["deathSkull"] = {
-			Image = "rbxassetid://97501789022692",
+			Image = "rbxassetid://137460629171781",
 			ImageRectOffset = Vector2.new(0, 0),
 			ImageRectSize = Vector2.new(300, 300),
 		},
 		["winTrophy"] = {
-			Image = "rbxassetid://97501789022692",
+			Image = "rbxassetid://137460629171781",
 			ImageRectOffset = Vector2.new(300, 0),
 			ImageRectSize = Vector2.new(300, 300),
 		},

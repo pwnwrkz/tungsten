@@ -24,3 +24,16 @@ pub fn resolve_api_key(flag: Option<String>) -> Option<String> {
     // Global system env var
     env::var(GLOBAL_VAR).ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_global_env_var() {
+        unsafe { std::env::set_var(GLOBAL_VAR, "test_global_key") };
+        let result = resolve_api_key(None);
+        unsafe { std::env::remove_var(GLOBAL_VAR) };
+        assert_eq!(result, Some("test_global_key".to_string()));
+    }
+}
