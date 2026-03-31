@@ -1,7 +1,7 @@
 [package]
 name = "tungsten-cli"
 description = "Another command line tool to manage Roblox assets similar to Tarmac and Asphalt."
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 license-file = "LICENSE"
 readme = "README.md"

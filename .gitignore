@@ -21,8 +21,8 @@ target/
 /target
 
 # Tungsten specific ignores
-tungsten.toml
-tungsten.lock.toml
+/tungsten.toml
+/tungsten.lock.toml
 
 # Tungsten API key
 tungsten_api_key.env
