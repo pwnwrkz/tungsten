@@ -14,7 +14,7 @@ path = "assets/**/*.png"
 output_path = "src/assets.luau"
 packable = false
 "#;
-const GITIGNORE_ENTRY: &str = "\n\n# Tungsten API key\ntungsten_api_key.env\n";
+const GITIGNORE_ENTRY: &str = "# Tungsten API key\ntungsten_api_key.env\n";
 
 pub fn run() -> Result<()> {
     // tungsten.toml creation
@@ -31,11 +31,7 @@ pub fn run() -> Result<()> {
     log!(success, "Created tungsten.toml");
     log!(
         info,
-        "Edit it to set your creator ID and input paths, then run \"tungsten sync --target roblox\""
-    );
-    log!(
-        info,
-        "API key: use --api-key, a tungsten_api_key.env file, or set TUNGSTEN_GLOBAL_APIKEY"
+        "For more info on how to set up your tungsten.toml file, check out the wiki at https://pwnwrkz.github.io/tungsten-docs/reference/configuration/"
     );
 
     // .gitignore update
@@ -43,7 +39,13 @@ pub fn run() -> Result<()> {
     let existing = std::fs::read_to_string(gitignore).unwrap_or_default();
 
     if !existing.contains("tungsten_api_key.env") {
-        std::fs::write(gitignore, format!("{}{}", existing, GITIGNORE_ENTRY))
+        let content = if existing.is_empty() {
+            GITIGNORE_ENTRY.to_string()
+        } else {
+            format!("{}\n{}", existing, GITIGNORE_ENTRY)
+        };
+
+        std::fs::write(gitignore, content)
             .map_err(|e| anyhow::anyhow!("Failed to update .gitignore: {}", e))?;
         log!(success, "Added tungsten_api_key.env to .gitignore");
     }

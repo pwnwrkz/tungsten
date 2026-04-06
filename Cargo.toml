@@ -1,12 +1,13 @@
 [package]
 name = "tungsten-cli"
 description = "Another command line tool to manage Roblox assets similar to Tarmac and Asphalt."
-version = "0.1.3"
+version = "1.0.0"
 edition = "2024"
 license-file = "LICENSE"
 readme = "README.md"
 homepage = "https://pwnwrkz.github.io/tungsten-docs"
 repository = "https://github.com/pwnwrkz/tungsten/"
+keywords = ["roblox", "assets", "sync", "upload"]
 
 exclude = [
     ".github/**",
@@ -23,15 +24,24 @@ colored = "3.1.1"
 crunch = "0.5.3"
 glob = "0.3.3"
 hex = "0.4.3"
-image = "0.25.10"
+image = { version = "0.25.10", features = ["jpeg", "bmp", "tga"] }
 rayon = "1.11.0"
 reqwest = { version = "0.13.2", features = ["json", "multipart"] }
+resvg = "0.47.0"
+roblox_install = "1.0.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-sha2 = "0.10.9"
+sha2 = "0.11.0"
+tiny-skia = "0.12.0"
 tokio = { version = "1.50.0", features = ["full"] }
 toml = "1.1.0"
+usvg = "0.47.0"
 
 [[bin]]
 name = "tungsten"
 path = "src/main.rs"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

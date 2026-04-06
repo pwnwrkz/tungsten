@@ -43,20 +43,38 @@ enum Commands {
 async fn main() {
     let cli = Cli::parse();
 
-    let result = match cli.command {
-        Commands::Sync { target, api_key } => match config::load("tungsten.toml") {
-            Ok(config) => commands::sync::run(config, api_key, &target).await,
-            Err(e) => Err(e),
-        },
-        Commands::Init => commands::init::run(),
-        Commands::Test { api_key } => match config::load("tungsten.toml") {
-            Ok(config) => commands::test::run(config, api_key).await,
-            Err(e) => Err(e),
-        },
+    let result = tokio::select! {
+        // Normal operation.
+        res = run(cli) => res,
+
+        // Ctrl+C / SIGINT — log cleanly and exit.
+        _ = tokio::signal::ctrl_c() => {
+            // Blank line so the ^C character from the terminal doesn't run
+            // into our log line.
+            println!();
+            log!(error, "Tungsten was interrupted — operation did not complete");
+            log!(warn, "Any uploads already in flight have been cancelled");
+            log!(warn, "Re-run sync to resume; completed uploads are cached in tungsten.lock.toml");
+            std::process::exit(130); // 128 + SIGINT(2), standard convention
+        }
     };
 
     if let Err(e) = result {
         log!(error, "{:#}", e);
         std::process::exit(1);
+    }
+}
+
+async fn run(cli: Cli) -> anyhow::Result<()> {
+    match cli.command {
+        Commands::Sync { target, api_key } => {
+            let config = config::load("tungsten.toml")?;
+            commands::sync::run(config, api_key, &target).await
+        }
+        Commands::Init => commands::init::run(),
+        Commands::Test { api_key } => {
+            let config = config::load("tungsten.toml")?;
+            commands::test::run(config, api_key).await
+        }
     }
 }

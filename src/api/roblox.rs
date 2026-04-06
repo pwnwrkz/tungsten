@@ -35,7 +35,7 @@ pub struct GroupCreator {
     pub group_id: String,
 }
 
-/// Response from polling an upload operation.
+/// Response from initiating an upload operation.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Operation {

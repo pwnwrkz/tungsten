@@ -6,6 +6,7 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use crate::api::roblox::*;
+use crate::core::asset::AssetKind;
 use crate::log;
 
 pub struct RobloxClient {
@@ -18,10 +19,24 @@ pub struct RobloxClient {
     fatally_failed: AtomicBool,
 }
 
+/// Everything the uploader needs to know about a single asset.
+pub struct UploadParams {
+    /// File name used in the multipart form.
+    pub file_name: String,
+    /// Display name sent in the JSON body.
+    pub display_name: String,
+    /// Description sent in the JSON body.
+    pub description: String,
+    /// Raw bytes of the (possibly converted) asset.
+    pub data: Vec<u8>,
+    /// Asset kind — determines API type string and MIME type.
+    pub kind: AssetKind,
+    /// Creator to upload under.
+    pub creator: Creator,
+}
+
 impl RobloxClient {
     pub fn new(api_key: String) -> Self {
-        // Build a shared client with a connection pool so every upload reuses
-        // the same TCP connections instead of opening fresh ones each time.
         let client = Client::builder()
             .pool_max_idle_per_host(8)
             .build()
@@ -35,27 +50,29 @@ impl RobloxClient {
         }
     }
 
-    pub async fn upload(&self, name: &str, data: Vec<u8>, creator: Creator) -> Result<u64> {
+    /// Upload an asset and return its Roblox asset ID.
+    pub async fn upload(&self, params: UploadParams) -> Result<u64> {
         let request_json = serde_json::to_string(&UploadRequest {
-            asset_type: "Decal".to_string(),
-            display_name: name.to_string(),
-            description: "Uploaded by Tungsten".to_string(),
-            creation_context: CreationContext { creator },
+            asset_type: params.kind.api_type().to_string(),
+            display_name: params.display_name.clone(),
+            description: params.description.clone(),
+            creation_context: CreationContext {
+                creator: params.creator,
+            },
         })
         .context("Failed to serialize upload request")?;
 
-        // `data` and `name` are moved into the closure via Arc/clone only when
-        // the closure is actually invoked (≤ MAX_RETRIES times), keeping the
-        // hot path allocation-free on the first attempt.
+        let mime = params.kind.mime();
+
         let response = self
             .send_with_retry(|client| {
                 let form = multipart::Form::new()
                     .text("request", request_json.clone())
                     .part(
                         "fileContent",
-                        multipart::Part::bytes(data.clone())
-                            .file_name(name.to_owned())
-                            .mime_str("image/png")
+                        multipart::Part::bytes(params.data.clone())
+                            .file_name(params.file_name.clone())
+                            .mime_str(mime)
                             .unwrap(),
                     );
 
@@ -114,7 +131,7 @@ impl RobloxClient {
         }
 
         bail!(
-            "Upload timed out after {} attempts\n  \
+            "Upload timed out after {} poll attempts\n  \
              Hint: The asset may still be processing, check your Roblox inventory",
             MAX_POLLS
         )
@@ -132,7 +149,7 @@ impl RobloxClient {
         let mut attempt: u8 = 0;
 
         loop {
-            // Respect any active rate-limit window before firing the request.
+            // Respect any active rate-limit window.
             {
                 let reset = self.rate_limit_reset.lock().await;
                 if let Some(reset_at) = *reset {
@@ -154,8 +171,6 @@ impl RobloxClient {
                 reqwest::StatusCode::OK => return Ok(response),
 
                 reqwest::StatusCode::TOO_MANY_REQUESTS if attempt < MAX_RETRIES => {
-                    // Prefer the server-supplied reset header; fall back to
-                    // exponential back-off if it's missing or unparseable.
                     let wait = response
                         .headers()
                         .get("x-ratelimit-reset")
