@@ -1,3 +1,4 @@
+pub mod alpha_bleed;
 pub mod asset;
 pub mod codegen;
 pub mod convert;

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 const LOCKFILE_PATH: &str = "tungsten.lock.toml";
-const LOCKFILE_VERSION: u32 = 1;
+const LOCKFILE_VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Lockfile {
@@ -19,7 +19,13 @@ pub struct Lockfile {
 
 #[derive(Serialize, Deserialize)]
 pub struct LockfileEntry {
-    pub asset_id: u64,
+    /// Cloud asset ID (set after a successful `tungsten sync cloud` upload).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_id: Option<u64>,
+    /// Studio content URI (set after a successful `tungsten sync studio` copy).
+    /// Format: `rbxasset://.tungsten_<project>/<relative_path>`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub studio_uri: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -42,7 +48,17 @@ impl Lockfile {
             || "Failed to parse lockfile — it may be corrupted, try deleting it and re-running",
         )?;
 
-        lf.dirty = false;
+        // v1 → v2: asset_id was a bare u64, now Option<u64>.
+        // serde(default) handles field-level coercion automatically on read,
+        // so no entry migration is needed — just stamp the new version and
+        // mark dirty so the upgraded format is flushed on the next save().
+        if lf.version < LOCKFILE_VERSION {
+            lf.version = LOCKFILE_VERSION;
+            lf.dirty = true;
+        } else {
+            lf.dirty = false;
+        }
+
         Ok(lf)
     }
 
@@ -66,17 +82,51 @@ impl Lockfile {
         self.save()
     }
 
+    /// Look up a cached cloud asset ID.
     #[inline]
     pub fn get(&self, input_name: &str, hash: &str) -> Option<u64> {
-        self.inputs.get(input_name)?.get(hash).map(|e| e.asset_id)
+        self.inputs.get(input_name)?.get(hash)?.asset_id
     }
 
+    /// Look up a cached Studio content URI.
+    #[inline]
+    pub fn get_uri(&self, input_name: &str, hash: &str) -> Option<&str> {
+        self.inputs
+            .get(input_name)?
+            .get(hash)?
+            .studio_uri
+            .as_deref()
+    }
+
+    /// Store a cloud asset ID, preserving any existing studio_uri for the same hash.
     #[inline]
     pub fn set(&mut self, input_name: &str, hash: String, asset_id: u64) {
-        self.inputs
+        let entry = self
+            .inputs
             .entry(input_name.to_string())
             .or_default()
-            .insert(hash, LockfileEntry { asset_id });
+            .entry(hash)
+            .or_insert_with(|| LockfileEntry {
+                asset_id: None,
+                studio_uri: None,
+            });
+        entry.asset_id = Some(asset_id);
+        self.dirty = true;
+    }
+
+    /// Store a Studio content URI, preserving any existing asset_id for the same hash.
+    #[inline]
+    pub fn set_uri(&mut self, input_name: &str, hash: String, uri: String) {
+        let entry = self
+            .inputs
+            .entry(input_name.to_string())
+            .or_default()
+            .entry(hash)
+            .or_insert_with(|| LockfileEntry {
+                asset_id: None,
+                studio_uri: None,
+            });
+        entry.studio_uri = Some(uri);
         self.dirty = true;
     }
 
@@ -99,7 +149,7 @@ pub fn hash_image(data: &[u8]) -> String {
     })
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// Tests
 
 #[cfg(test)]
 mod tests {
@@ -126,11 +176,7 @@ mod tests {
     fn test_save_no_write_when_clean() {
         // save() on an unmodified lockfile should be a no-op (no I/O).
         // We can't easily assert no I/O, but we can at least assert it returns Ok.
-        let mut lf = Lockfile {
-            version: 1,
-            inputs: HashMap::new(),
-            dirty: false,
-        };
+        let mut lf = Lockfile::default();
         assert!(lf.save().is_ok());
     }
 

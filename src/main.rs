@@ -4,6 +4,8 @@ mod core;
 mod utils;
 
 use clap::{Parser, Subcommand};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use utils::config;
 
 #[derive(Parser)]
@@ -21,11 +23,23 @@ struct Cli {
 enum Commands {
     /// Pack and upload assets to Roblox
     Sync {
-        /// Upload target (roblox or none)
+        /// Upload target: `cloud`, `studio`, or `debug`
+        target: Option<String>,
+
+        /// Roblox Open Cloud API key (required for cloud target)
         #[arg(long)]
+        api_key: Option<String>,
+
+        /// Dry run, show what would be uploaded without doing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Watch asset folders and re-sync automatically on changes
+    Watch {
+        /// Upload target: `cloud`, `studio`, or `debug`
         target: String,
 
-        /// Roblox Open Cloud API key (required for syncing to Roblox)
+        /// Roblox Open Cloud API key (required for cloud target)
         #[arg(long)]
         api_key: Option<String>,
     },
@@ -43,19 +57,27 @@ enum Commands {
 async fn main() {
     let cli = Cli::parse();
 
-    let result = tokio::select! {
-        // Normal operation.
-        res = run(cli) => res,
+    // Shared flag so watch::run can signal whether a sync is in progress.
+    // Only meaningful for the Watch command; ignored by all others.
+    let is_syncing = Arc::new(AtomicBool::new(false));
+    let is_watch = matches!(cli.command, Commands::Watch { .. });
 
-        // Ctrl+C / SIGINT — log cleanly and exit.
+    let result = tokio::select! {
+        res = run(cli, Arc::clone(&is_syncing)) => res,
         _ = tokio::signal::ctrl_c() => {
-            // Blank line so the ^C character from the terminal doesn't run
-            // into our log line.
             println!();
-            log!(error, "Tungsten was interrupted — operation did not complete");
-            log!(warn, "Any uploads already in flight have been cancelled");
-            log!(warn, "Re-run sync to resume; completed uploads are cached in tungsten.lock.toml");
-            std::process::exit(130); // 128 + SIGINT(2), standard convention
+            if is_watch {
+                if is_syncing.load(Ordering::Relaxed) {
+                    log!(error, "Watching was cancelled while a sync was in progress — some assets may not have been processed");
+                    log!(warn, "Re-run sync to resume; completed uploads are cached in tungsten.lock.toml");
+                } else {
+                    log!(warn, "Watching was cancelled");
+                }
+            } else {
+                log!(error, "Tungsten was interrupted — operation did not complete");
+                log!(warn, "Re-run sync to resume; completed uploads are cached in tungsten.lock.toml");
+            }
+            std::process::exit(130);
         }
     };
 
@@ -65,11 +87,30 @@ async fn main() {
     }
 }
 
-async fn run(cli: Cli) -> anyhow::Result<()> {
+async fn run(cli: Cli, is_syncing: Arc<AtomicBool>) -> anyhow::Result<()> {
     match cli.command {
-        Commands::Sync { target, api_key } => {
+        Commands::Sync {
+            target,
+            api_key,
+            dry_run,
+        } => {
             let config = config::load("tungsten.toml")?;
-            commands::sync::run(config, api_key, &target).await
+            let target = match target {
+                Some(t) => commands::sync::Target::parse(&t)?,
+                None => {
+                    if dry_run {
+                        commands::sync::Target::parse("debug")?
+                    } else {
+                        anyhow::bail!("Target is required when not in dry run mode.");
+                    }
+                }
+            };
+            commands::sync::run(config, api_key, target, dry_run).await
+        }
+        Commands::Watch { target, api_key } => {
+            let config = config::load("tungsten.toml")?;
+            let target = commands::sync::Target::parse(&target)?;
+            commands::watch::run(config, api_key, target, is_syncing).await
         }
         Commands::Init => commands::init::run(),
         Commands::Test { api_key } => {

@@ -12,14 +12,34 @@ pub struct Config {
 #[derive(Deserialize)]
 pub struct CreatorConfig {
     #[serde(rename = "type")]
+    /// Creator type to use: `"user"` or `"group"`. Defaults to `"user"`.
     pub creator_type: String,
+    /// Creator ID to use.
     pub id: u64,
 }
 
 #[derive(Deserialize)]
 pub struct CodegenConfig {
+    /// Codegen style: `"flat"` or `"nested"`. Defaults to `"flat"`.
     pub style: Option<String>,
+    /// Whether to strip the file extension from asset names in the output.
+    /// Defaults to `true`.
     pub strip_extension: Option<bool>,
+    /// Whether to generate a sibling `.d.ts` TypeScript definition file
+    /// alongside the Luau output. Defaults to `false`.
+    ///
+    /// The declaration file mirrors the Luau structure, with asset values
+    /// typed as `string` and sprite entries as typed objects with
+    /// `Image`, `ImageRectOffset`, and `ImageRectSize` fields.
+    ///
+    /// Example:
+    /// ```toml
+    /// [codegen]
+    /// style = "flat"
+    /// strip_extension = true
+    /// ts_declaration = true
+    /// ```
+    pub ts_declaration: Option<bool>,
 }
 
 /// Per-input configuration block.
@@ -42,7 +62,7 @@ pub struct CodegenConfig {
 pub struct InputConfig {
     /// Glob pattern for source files.
     pub path: String,
-    /// Path to the generated Luau file.
+    /// Path to the generated Luau/TypeScript file.
     pub output_path: String,
     /// Pack images into spritesheets. Only applies to image inputs.
     pub packable: Option<bool>,
@@ -79,7 +99,7 @@ pub fn load(path: &str) -> Result<Config> {
     })
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// Tests
 
 #[cfg(test)]
 mod tests {
@@ -178,5 +198,51 @@ mod tests {
         );
         let input = cfg.inputs.get("assets").unwrap();
         assert!(input.convert.is_none());
+    }
+
+    #[test]
+    fn test_ts_declaration_field_parses() {
+        let cfg = parse(
+            r#"
+            [creator]
+            type = "user"
+            id = 1
+
+            [codegen]
+            style = "flat"
+            strip_extension = true
+            ts_declaration = true
+
+            [inputs.assets]
+            path = "assets/**/*.png"
+            output_path = "src/assets.luau"
+        "#,
+        );
+        let ts_def = cfg
+            .codegen
+            .as_ref()
+            .and_then(|c| c.ts_declaration)
+            .unwrap_or(false);
+        assert!(ts_def);
+    }
+
+    #[test]
+    fn test_ts_declaration_defaults_to_none() {
+        let cfg = parse(
+            r#"
+            [creator]
+            type = "user"
+            id = 1
+
+            [codegen]
+            style = "flat"
+
+            [inputs.assets]
+            path = "assets/**/*.png"
+            output_path = "src/assets.luau"
+        "#,
+        );
+        let ts_def = cfg.codegen.as_ref().and_then(|c| c.ts_declaration);
+        assert!(ts_def.is_none());
     }
 }
