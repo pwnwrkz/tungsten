@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
 
+const MIN_SVG_SCALE: f32 = 0.01;
+
 #[derive(Deserialize)]
 pub struct Config {
     pub creator: CreatorConfig,
@@ -9,13 +11,25 @@ pub struct Config {
     pub inputs: HashMap<String, InputConfig>,
 }
 
+fn default_creator_type() -> String {
+   "user".to_string()
+}
+
 #[derive(Deserialize)]
 pub struct CreatorConfig {
-    #[serde(rename = "type")]
+    #[serde(rename = "type", default = "default_creator_type")]
     /// Creator type to use: `"user"` or `"group"`. Defaults to `"user"`.
     pub creator_type: String,
     /// Creator ID to use.
     pub id: u64,
+}
+
+
+impl CodegenConfig {
+    /// Returns the configured codegen style, defaulting to `"flat"` when omitted.
+    pub fn resolved_style(&self) -> &str {
+        self.style.as_deref().unwrap_or("flat")
+    }
 }
 
 #[derive(Deserialize)]
@@ -79,7 +93,7 @@ pub struct InputConfig {
 impl InputConfig {
     /// Resolved SVG rasterization scale (defaults to 1.0).
     pub fn resolved_svg_scale(&self) -> f32 {
-        self.svg_scale.unwrap_or(1.0).max(0.01)
+        self.svg_scale.unwrap_or(1.0).max(MIN_SVG_SCALE)
     }
 }
 
