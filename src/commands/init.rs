@@ -396,7 +396,7 @@ fn build_config(dirs: &[DiscoveredDir]) -> String {
             out.push_str(&format!("path = \"{}\"\n", block.glob));
             out.push_str(&format!("output_path = \"{}\"\n", block.output_path));
             if block.packable {
-                out.push_str("packable = false\n");
+                out.push_str("packable = true\n");
             }
             out.push('\n');
         }
@@ -558,7 +558,7 @@ mod tests {
         let cfg = build_config(&dirs);
         assert!(cfg.contains("[inputs.icons]"));
         assert!(cfg.contains("[inputs.sounds]"));
-        assert!(cfg.contains("packable = false")); // icons is an image dir
+        assert!(cfg.contains("packable = true")); // icons is an image dir
         assert!(cfg.contains("**/")); // icons has subdirs
         assert!(!cfg.contains("sounds/**/")); // sounds has no subdirs
     }

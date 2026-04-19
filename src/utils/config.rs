@@ -23,7 +23,7 @@ pub struct CodegenConfig {
     /// Codegen style: `"flat"` or `"nested"`. Defaults to `"flat"`.
     pub style: Option<String>,
     /// Whether to strip the file extension from asset names in the output.
-    /// Defaults to `true`.
+    /// Defaults to `false`.
     pub strip_extension: Option<bool>,
     /// Whether to generate a sibling `.d.ts` TypeScript definition file
     /// alongside the Luau output. Defaults to `false`.
