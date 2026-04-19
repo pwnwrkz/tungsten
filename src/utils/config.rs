@@ -24,14 +24,6 @@ pub struct CreatorConfig {
     pub id: u64,
 }
 
-
-impl CodegenConfig {
-    /// Returns the configured codegen style, defaulting to `"flat"` when omitted.
-    pub fn resolved_style(&self) -> &str {
-        self.style.as_deref().unwrap_or("flat")
-    }
-}
-
 #[derive(Deserialize)]
 pub struct CodegenConfig {
     /// Codegen style: `"flat"` or `"nested"`. Defaults to `"flat"`.
@@ -54,6 +46,14 @@ pub struct CodegenConfig {
     /// ts_declaration = true
     /// ```
     pub ts_declaration: Option<bool>,
+}
+
+impl CodegenConfig {
+    /// Returns the configured codegen style, defaulting to `"flat"` when omitted.
+    #[allow(dead_code)]
+    pub fn resolved_style(&self) -> &str {
+        self.style.as_deref().unwrap_or("flat")
+    }
 }
 
 /// Per-input configuration block.
