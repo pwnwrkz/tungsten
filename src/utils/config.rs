@@ -12,7 +12,7 @@ pub struct Config {
 }
 
 fn default_creator_type() -> String {
-   "user".to_string()
+    "user".to_string()
 }
 
 #[derive(Deserialize)]
@@ -121,6 +121,28 @@ mod tests {
 
     fn parse(s: &str) -> Config {
         toml::from_str(s).unwrap()
+    }
+
+    #[test]
+    fn resolved_style_defaults_to_flat_when_none() {
+        let cfg = CodegenConfig {
+            style: None,
+            strip_extension: None,
+            ts_declaration: None,
+        };
+
+        assert_eq!(cfg.resolved_style(), "flat");
+    }
+
+    #[test]
+    fn resolved_style_returns_configured_style() {
+        let cfg = CodegenConfig {
+            style: Some("nested".to_string()),
+            strip_extension: None,
+            ts_declaration: None,
+        };
+
+        assert_eq!(cfg.resolved_style(), "nested");
     }
 
     #[test]
