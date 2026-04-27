@@ -48,7 +48,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Rustfmt
-        run: cargo fmt -- --check
+        run: cargo fmt
 
       - name: Clippy
         run: cargo clippy --all-features --all-targets

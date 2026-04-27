@@ -240,7 +240,10 @@ pub async fn run(
                             .into_rgba8();
                         let done = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                         progress("Rasterizing", done, svg_total, &name);
-                        Some(pack::InputImage { name: name.to_string(), image })
+                        Some(pack::InputImage {
+                            name: name.to_string(),
+                            image,
+                        })
                     })
                     .collect()
             };
