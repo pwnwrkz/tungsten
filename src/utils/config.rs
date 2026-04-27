@@ -68,13 +68,8 @@ impl CodegenConfig {
 pub struct CompressOptions {
     /// JPEG quality 1–100. Defaults to 80.
     pub jpeg_quality: Option<u32>,
-    /// PNG optimization level 1–6. Defaults to 3.
+    /// PNG quality 1–100. Defaults to 80.
     pub png_quality: Option<u32>,
-    /// WebP quality 1–100. Defaults to 80.
-    pub webp_quality: Option<u32>,
-    /// GIF optimization. Defaults to true.
-    pub optimize_gif: Option<bool>,
-
     /// Preserve EXIF/XMP/ICC metadata in the output. Defaults to false.
     pub keep_metadata: Option<bool>,
 }
@@ -85,8 +80,6 @@ impl CompressOptions {
         ResolvedCompressOptions {
             jpeg_quality: self.jpeg_quality.unwrap_or(80),
             png_quality: self.png_quality.unwrap_or(3),
-            webp_quality: self.webp_quality.unwrap_or(80),
-            optimize_gif: self.optimize_gif.unwrap_or(true),
             keep_metadata: self.keep_metadata.unwrap_or(false),
         }
     }
@@ -309,8 +302,7 @@ mod tests {
 
             [inputs.icons.compress_options]
             jpeg_quality  = 70
-            png_quality   = 5
-            webp_quality  = 75
+            png_quality   = 60
             optimize_gif  = false
             keep_metadata = true
         "#,
@@ -323,9 +315,7 @@ mod tests {
             .as_ref()
             .unwrap();
         assert_eq!(opts.jpeg_quality, Some(70));
-        assert_eq!(opts.png_quality, Some(5));
-        assert_eq!(opts.webp_quality, Some(75));
-        assert_eq!(opts.optimize_gif, Some(false));
+        assert_eq!(opts.png_quality, Some(60));
         assert_eq!(opts.keep_metadata, Some(true));
     }
 

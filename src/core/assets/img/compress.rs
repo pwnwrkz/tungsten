@@ -13,12 +13,8 @@ use caesium::parameters::CSParameters;
 pub struct CompressOptions {
     /// JPEG quality 1–100. Defaults to 80.
     pub jpeg_quality: u32,
-    /// PNG optimization level 1–6. Defaults to 3.
+    /// PNG quality 1-100. Defaults to 80.
     pub png_quality: u32,
-    /// WebP quality 1–100. Defaults to 80.
-    pub webp_quality: u32,
-    /// GIF optimization. Defaults to true.
-    pub optimize_gif: bool,
     /// Preserve EXIF/XMP/ICC metadata. Defaults to false.
     pub keep_metadata: bool,
 }
@@ -27,9 +23,7 @@ impl Default for CompressOptions {
     fn default() -> Self {
         Self {
             jpeg_quality: 80,
-            png_quality: 3,
-            webp_quality: 80,
-            optimize_gif: true,
+            png_quality: 80,
             keep_metadata: true,
         }
     }
@@ -98,8 +92,6 @@ fn build_params(options: &CompressOptions) -> CSParameters {
     params.keep_metadata = options.keep_metadata;
     params.jpeg.quality = options.jpeg_quality;
     params.png.quality = options.png_quality;
-    params.webp.quality = options.webp_quality;
-    params.gif.quality = options.optimize_gif as u32;
 
     params
 }
