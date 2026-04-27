@@ -294,7 +294,7 @@ fn is_noise_dir(name: &str) -> bool {
 fn make_input_name(rel_path: &str) -> String {
     rel_path
         .split('/')
-        .last()
+        .next_back()
         .unwrap_or(rel_path)
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })

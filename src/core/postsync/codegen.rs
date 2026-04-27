@@ -194,7 +194,7 @@ fn strip_ext(name: &str) -> &str {
     }
 }
 
-fn entry_key<'a>(entry: &'a CodegenEntry, strip_extension: bool) -> &'a str {
+fn entry_key(entry: &CodegenEntry, strip_extension: bool) -> &str {
     if strip_extension {
         strip_ext(&entry.name)
     } else {
@@ -286,7 +286,7 @@ fn emit_dpi_function(variants: &[(u8, u64)], lines: &mut Vec<String>, depth: usi
 
     // Emit highest scale first (>= N), then descending, with bare return last.
     let mut sorted = variants.to_vec();
-    sorted.sort_by(|a, b| b.0.cmp(&a.0)); // descending
+    sorted.sort_by_key(|b| std::cmp::Reverse(b.0)); // descending
 
     let highest = sorted[0].0;
     for (i, &(scale, id)) in sorted.iter().enumerate() {
@@ -346,10 +346,10 @@ fn luau_flat(
                 lines.push(format!("\t{} = ", key));
                 emit_dpi_function(variants, lines, 1);
                 // Replace the last line's closing `end` with `end,`
-                if let Some(last) = lines.last_mut() {
-                    if last.trim() == "end" {
-                        *last = format!("\t{}", "end,");
-                    }
+                if let Some(last) = lines.last_mut()
+                    && last.trim() == "end"
+                {
+                    *last = format!("\t{}", "end,");
                 }
             }
         }
@@ -401,7 +401,7 @@ fn write_luau_tree(tree: &BTreeMap<String, TreeNode>, lines: &mut Vec<String>, d
                     let ind2 = "\t".repeat(depth + 2);
 
                     let mut sorted = variants.clone();
-                    sorted.sort_by(|a, b| b.0.cmp(&a.0));
+                    sorted.sort_by_key(|b| std::cmp::Reverse(b.0));
 
                     for (i, &(scale, id)) in sorted.iter().enumerate() {
                         if i == 0 {

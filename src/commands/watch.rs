@@ -25,7 +25,7 @@ pub async fn run(
     let watch_dirs: Vec<String> = config
         .inputs
         .values()
-        .map(|input| crate::commands::sync::glob_base(&input.path))
+        .map(|input| crate::commands::sync::paths::glob_base(&input.path))
         .filter(|base| !base.is_empty())
         .collect();
 
@@ -88,22 +88,21 @@ pub async fn run(
             }
         }
 
-        if pending_change {
-            if let Some(t) = last_event {
-                if t.elapsed() >= Duration::from_millis(DEBOUNCE_MS) {
-                    pending_change = false;
-                    last_event = None;
-                    log!(section, "Change detected — re-syncing");
-                    let fresh_config = match config::load("tungsten.toml") {
-                        Ok(c) => c,
-                        Err(e) => {
-                            log!(warn, "Failed to reload tungsten.toml: {}", e);
-                            continue;
-                        }
-                    };
-                    do_sync(&api_key, target, &fresh_config, &is_syncing).await;
+        if pending_change
+            && let Some(t) = last_event
+            && t.elapsed() >= Duration::from_millis(DEBOUNCE_MS)
+        {
+            pending_change = false;
+            last_event = None;
+            log!(section, "Change detected — re-syncing");
+            let fresh_config = match config::load("tungsten.toml") {
+                Ok(c) => c,
+                Err(e) => {
+                    log!(warn, "Failed to reload tungsten.toml: {}", e);
+                    continue;
                 }
-            }
+            };
+            do_sync(&api_key, target, &fresh_config, &is_syncing).await;
         }
 
         tokio::time::sleep(Duration::from_millis(50)).await;

@@ -2,10 +2,11 @@ use anyhow::Result;
 use std::sync::Arc;
 
 #[allow(unused_imports)]
-use crate::api::roblox::{Creator, GroupCreator, UserCreator};
+use crate::api::sync::roblox::{Creator, GroupCreator, UserCreator};
 use crate::api::upload::{RobloxClient, UploadParams};
-use crate::commands::sync::{collect_paths, make_creator};
-use crate::core::asset::{AssetKind, ImageFormat};
+use crate::commands::sync::make_creator;
+use crate::commands::sync::paths::collect_paths;
+use crate::core::assets::asset::{AssetKind, ImageFormat};
 use crate::log;
 use crate::utils::config::Config;
 use crate::utils::env::resolve_api_key;

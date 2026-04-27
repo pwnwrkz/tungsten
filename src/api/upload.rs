@@ -5,8 +5,8 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
-use crate::api::roblox::*;
-use crate::core::asset::AssetKind;
+use crate::api::sync::roblox::*;
+use crate::core::assets::asset::AssetKind;
 use crate::log;
 
 pub struct RobloxClient {

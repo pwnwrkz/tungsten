@@ -1,4 +1,2 @@
-pub mod debug;
-pub mod roblox;
-pub mod studio;
+pub mod sync;
 pub mod upload;
