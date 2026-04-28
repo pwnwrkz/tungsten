@@ -212,7 +212,7 @@ pub async fn process_individual(
             dispatched += 1;
             progress("Uploading", dispatched, total, &base_name);
             let fake: Vec<(u8, u64)> = variants.iter().map(|(s, _)| (*s, 0)).collect();
-            codegen_entries.push(CodegenEntry::dpi_group(base_name, fake));
+            codegen_entries.push(CodegenEntry::dpi_group(base_name.to_string(), fake));
             continue;
         }
 
@@ -320,7 +320,10 @@ pub async fn process_individual(
 
         if !resolved_variants.is_empty() {
             resolved_variants.sort_by_key(|(s, _)| *s);
-            codegen_entries.push(CodegenEntry::dpi_group(base_name, resolved_variants));
+            codegen_entries.push(CodegenEntry::dpi_group(
+                base_name.to_string(),
+                resolved_variants,
+            ));
         }
     }
 
