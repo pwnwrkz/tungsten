@@ -16,6 +16,10 @@ exclude = [
     "examples",
     "examples/**",
 ]
+include = [
+    "src/",
+    "src/**"
+]
 
 [dependencies]
 anyhow = "1.0.102"
