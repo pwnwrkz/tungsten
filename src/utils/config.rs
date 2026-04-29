@@ -68,7 +68,9 @@ impl CodegenConfig {
 pub struct CompressOptions {
     /// JPEG quality 1–100. Defaults to 80.
     pub jpeg_quality: Option<u32>,
-    /// PNG quality 1–100. Defaults to 80.
+    /// PNG quality percentage 1–100 (higher = better quality, larger files).
+    /// This is a user-facing percentage scale, not a raw PNG compression level (0–9).
+    /// Defaults to 80.
     pub png_quality: Option<u32>,
     /// Preserve EXIF/XMP/ICC metadata in the output. Defaults to false.
     pub keep_metadata: Option<bool>,

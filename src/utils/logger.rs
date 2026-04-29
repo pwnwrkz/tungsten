@@ -80,7 +80,7 @@ pub fn progress(phase: &str, current: usize, total: usize, item: &str) {
         println!("\r{}", done_line);
     } else {
         print!("\r{}", line);
-        std::io::stdout().flush().unwrap();
+        std::io::stdout().flush().expect("Failed to flush stdout");
     }
 }
 
@@ -88,5 +88,5 @@ pub fn progress(phase: &str, current: usize, total: usize, item: &str) {
 pub fn clear_progress_line() {
     // Overwrite with enough spaces to clear a typical terminal line.
     print!("\r{:<120}\r", "");
-    std::io::stdout().flush().unwrap();
+    std::io::stdout().flush().expect("Failed to flush stdout");
 }
