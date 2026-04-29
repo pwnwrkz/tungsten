@@ -106,7 +106,7 @@ pub async fn run(
                 Some(Arc::new(d))
             }
             Err(e) => {
-                log!(error, "Failed to initialise debug sync: {}", e);
+                log!(error, "Failed to initialize debug sync: {}", e);
                 return Err(e);
             }
         }

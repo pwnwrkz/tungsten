@@ -79,7 +79,7 @@ impl CompressOptions {
     pub fn resolve(&self) -> ResolvedCompressOptions {
         ResolvedCompressOptions {
             jpeg_quality: self.jpeg_quality.unwrap_or(80),
-            png_quality: self.png_quality.unwrap_or(3),
+            png_quality: self.png_quality.unwrap_or(80),
             keep_metadata: self.keep_metadata.unwrap_or(false),
         }
     }
@@ -303,7 +303,6 @@ mod tests {
             [inputs.icons.compress_options]
             jpeg_quality  = 70
             png_quality   = 60
-            optimize_gif  = false
             keep_metadata = true
         "#,
         );

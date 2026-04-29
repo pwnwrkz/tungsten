@@ -58,7 +58,7 @@ pub fn progress(phase: &str, current: usize, total: usize, item: &str) {
         "  {:<phase_w$} [{}] {:>3}%  {}/{} {:<item_w$}",
         phase.cyan().bold(),
         bar,
-        format!("{}%", percent).cyan(),
+        percent.to_string().cyan(),
         current.to_string().bold(),
         total.to_string().bold(),
         item_display.dimmed(),
