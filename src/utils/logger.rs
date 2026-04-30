@@ -69,7 +69,8 @@ pub fn progress(phase: &str, current: usize, total: usize, item: &str) {
     if current >= total {
         // Finalize: overwrite with a clean ✓ line and move to the next line.
         let done_line = format!(
-            "  {:<phase_w$} [{}] {}  {}/{}",
+            "  {} {:<phase_w$} [{}] {}  {}/{}",
+            "✓".green().bold(),
             phase.cyan().bold(),
             "█".repeat(BAR_WIDTH).green().bold(),
             "100%".cyan(),
