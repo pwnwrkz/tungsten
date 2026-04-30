@@ -58,7 +58,7 @@ impl CodegenConfig {
 ///
 /// [inputs.icons.compress_options]
 /// jpeg_quality = 75
-/// png_quality    = 4
+/// png_quality    = 75
 /// keep_metadata = false
 /// ```
 ///
@@ -99,7 +99,7 @@ impl CompressOptions {
 ///
 /// [inputs.icons.compress_options]
 /// jpeg_quality = 75
-/// png_quality = 4
+/// png_quality = 75
 /// ```
 #[derive(Deserialize)]
 pub struct InputConfig {
