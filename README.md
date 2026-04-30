@@ -12,6 +12,11 @@
 # Documentation
 - Read the Tungsten documentation [here](https://pwnwrkz.github.io/tungsten-docs)
 
+# AI Disclosure
+Tungsten may use AI generated improvements to certain parts of the code with AI findings from GitHub, everything else is crafted by the team directly.
+
+We do not directly support generative AI in any way, but we do support AI as an assistant.
+
 # Credits
 ### Tungsten
 - [notmagniill](https://github.com/notmagniill) - Everything
