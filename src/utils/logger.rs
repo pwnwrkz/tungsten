@@ -69,7 +69,8 @@ pub fn progress(phase: &str, current: usize, total: usize, item: &str) {
     if current >= total {
         // Finalize: overwrite with a clean ✓ line and move to the next line.
         let done_line = format!(
-            "  {:<phase_w$} [{}] {}  {}/{}",
+            "  {} {:<phase_w$} [{}] {}  {}/{}",
+            "✓".green().bold(),
             phase.cyan().bold(),
             "█".repeat(BAR_WIDTH).green().bold(),
             "100%".cyan(),
@@ -92,5 +93,5 @@ pub fn clear_progress_line() {
     print!("\r{:<120}\r", "");
     std::io::stdout()
         .flush()
-        .expect("Failed to flush stdout while clearing progress line. This may occur if stdout is closed, the output pipe/consumer exited early, or terminal redirection is invalid. Ensure stdout is available and writable, then retry.");
+        .expect("Failed to flush stdout while clearing progress line");
 }
