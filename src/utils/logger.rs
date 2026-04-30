@@ -33,7 +33,7 @@ pub fn progress(phase: &str, current: usize, total: usize, item: &str) {
     use colored::Colorize;
 
     let ratio = if total == 0 {
-        1.0f32
+        0.0f32
     } else {
         current as f32 / total as f32
     };
