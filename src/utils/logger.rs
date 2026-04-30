@@ -33,7 +33,7 @@ pub fn progress(phase: &str, current: usize, total: usize, item: &str) {
     use colored::Colorize;
 
     let ratio = if total == 0 {
-        1.0f32
+        0.0f32
     } else {
         current as f32 / total as f32
     };
@@ -92,5 +92,5 @@ pub fn clear_progress_line() {
     print!("\r{:<120}\r", "");
     std::io::stdout()
         .flush()
-        .expect("Failed to flush stdout while clearing progress line");
+        .expect("Failed to flush stdout while clearing progress line. This may occur if stdout is closed, the output pipe/consumer exited early, or terminal redirection is invalid. Ensure stdout is available and writable, then retry.");
 }
