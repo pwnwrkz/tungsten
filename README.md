@@ -1,7 +1,7 @@
 <div align="center">
     <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="/assets/tungsten_banner_light.png">
-    <img align="center" src="/assets/tungsten_banner_dark.png" alt="Tungsten Banner">
+    <source media="(prefers-color-scheme: dark)" srcset="/assets/TungstenBannerLight.png">
+    <img align="center" src="/assets/TungstenBannerDark.png" alt="Tungsten Banner">
     </picture>
     <br/>
     <h2>Another command line tool to handle Roblox assets similar to Tarmac and Asphalt.</h2>
@@ -10,19 +10,27 @@
 </div>
 
 # Documentation
+
 Read the Tungsten documentation [here](https://pwnwrkz.github.io/tungsten)
 
 # AI Disclosure
+
 Tungsten may use AI generated improvements to certain parts of the code with AI findings from GitHub, everything else is crafted by the team directly.
 
 We do not directly support generative AI in any way, but we do support AI as an assistant.
 
 # Credits
+
 ### Tungsten
+
 - [notmagniill](https://github.com/notmagniill) - Everything
+
 ### Feature Requests
+
 - [RuizuKun-Dev](https://github.com/RuizuKun-Dev) - Image compression and Studio syncing
+
 ### Crates used by Tungsten
+
 <details>
 <summary><i>View the full crate list</i></summary>
 
