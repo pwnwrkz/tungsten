@@ -145,6 +145,35 @@ pub fn load(path: &str) -> Result<Config> {
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn input_with_svg_scale(svg_scale: Option<f32>) -> InputConfig {
+        InputConfig {
+            path: "assets/icons/**/*".to_string(),
+            output_path: "src/icons.luau".to_string(),
+            packable: None,
+            svg_scale,
+            compress_options: None,
+        }
+    }
+
+    #[test]
+    fn resolved_svg_scale_clamps_values_below_minimum() {
+        let input = input_with_svg_scale(Some(0.005));
+
+        assert_eq!(input.resolved_svg_scale(), MIN_SVG_SCALE);
+    }
+
+    #[test]
+    fn resolved_svg_scale_defaults_to_one_when_not_set() {
+        let input = input_with_svg_scale(None);
+
+        assert_eq!(input.resolved_svg_scale(), 1.0);
+    }
+}
+
 // Tests
 
 #[cfg(test)]
