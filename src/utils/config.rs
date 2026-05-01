@@ -80,8 +80,8 @@ impl CompressOptions {
     /// Merge into a `compress::CompressOptions`, filling gaps with defaults.
     pub fn resolve(&self) -> ResolvedCompressOptions {
         ResolvedCompressOptions {
-            jpeg_quality: self.jpeg_quality.unwrap_or(80),
-            png_quality: self.png_quality.unwrap_or(80),
+            jpeg_quality: self.jpeg_quality.unwrap_or(80).clamp(1, 100),
+            png_quality: self.png_quality.unwrap_or(80).clamp(1, 100),
             keep_metadata: self.keep_metadata.unwrap_or(false),
         }
     }
