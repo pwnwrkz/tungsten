@@ -1,7 +1,7 @@
 <div align="center">
     <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="/assets/TungstenBannerLight.png">
-    <img align="center" src="/assets/TungstenBannerDark.png" alt="Tungsten Banner">
+    <source media="(prefers-color-scheme: dark)" srcset="/assets/TungstenBannerLight.svg" width="100%">
+    <img align="center" src="/assets/TungstenBannerDark.svg" width="100%" alt="Tungsten Banner">
     </picture>
     <br/>
     <h2>Another command line tool to handle Roblox assets similar to Tarmac and Asphalt.</h2>
