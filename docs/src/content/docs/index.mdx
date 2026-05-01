@@ -1,0 +1,41 @@
+---
+title: Tungsten
+description: Main page for the Tungsten website.
+template: splash # Remove or comment out this line to display the site sidebar on this page.
+hero:
+  title: tungsten
+  tagline: Another command line tool to manage Roblox assets similar to Tarmac and Asphalt.
+  image:
+    file: ../../assets/TungstenLogo.png
+  actions:
+    - text: Get Started
+      link: /tungsten/getting-started/introduction/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/pwnwrkz/tungsten
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+# Features
+
+<CardGrid stagger>
+  <Card title="Multi-Asset Syncing" icon="rocket">
+    Sync Images, Audio, Models, and Animations simultaneously. Powered by
+    Roblox's Open Cloud API for secure, high-speed asset management.
+  </Card>
+  <Card title="Smarter Than Syncing" icon="random">
+    Go beyond Asphalt. Tungsten doesn't just sync assets, it automatically packs
+    images into optimized spritesheets on the go.
+  </Card>
+  <Card title="Built for Speed" icon="seti:vite">
+    Blazing fast execution. Tungsten is built in Rust for high-performance asset
+    pipelines that won't slow down your workflow.
+  </Card>
+  <Card title="Privacy First" icon="seti:lock">
+    Local processing by default. Your assets stay on your machine, no external
+    data sharing or third-party cloud processing required.
+  </Card>
+</CardGrid>

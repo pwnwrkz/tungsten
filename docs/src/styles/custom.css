@@ -1,0 +1,35 @@
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono&display=swap");
+
+@font-face {
+    font-family: "Mona Sans Bold";
+    src: url("../assets/fonts/MonaSansExpanded-Bold.ttf") format("truetype");
+    font-style: normal;
+}
+
+@font-face {
+    font-family: "Mona Sans";
+    src: url("../assets/fonts/MonaSansExpanded-Regular.ttf") format("truetype");
+    font-style: normal;
+}
+
+:root {
+    --sl-font: "Mona Sans", sans-serif;
+    --sl-font-mono: "JetBrains Mono", monospace;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    font-family: "Mona Sans Bold", sans-serif !important;
+}
+
+:root[data-theme="light"] .hero h1 {
+    color: #2F343B;
+}
+
+:root[data-theme="dark"] .hero h1 {
+    color: #aebeda;
+}

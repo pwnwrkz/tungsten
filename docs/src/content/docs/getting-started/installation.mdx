@@ -1,0 +1,57 @@
+---
+title: Installation
+description: How to install Tungsten on your system.
+---
+
+import { Tabs, TabItem, Aside, Steps } from '@astrojs/starlight/components';
+
+**Tungsten** is designed to integrate into your existing toolchain. Choose the installation method that aligns with your current development environment.
+
+## Installation
+
+<Tabs syncKey="package-managers">
+    <TabItem label="Rokit" icon="rocket">
+        Add Tungsten to your `rokit.toml`:
+        ```bash title="Terminal"
+        rokit add pwnwrkz/tungsten
+        ```
+    </TabItem>
+    <TabItem label="Aftman" icon="seti:config">
+        Add Tungsten to your `aftman.toml`:
+        ```bash title="Terminal"
+        aftman add pwnwrkz/tungsten
+        ```
+    </TabItem>
+    <TabItem label="Mise" icon="seti:config">
+        Use `mise-en-place` to manage your Tungsten version:
+        ```bash title="Terminal"
+        mise use github:pwnwrkz/tungsten
+        ```
+    </TabItem>
+    <TabItem label="Cargo" icon="seti:rust">
+        If you have the Rust toolchain installed:
+        ```bash title="Terminal"
+        cargo install tungsten-cli
+        ```
+        :::caution[Naming Note]
+        The package is published as `tungsten-cli` on [crates.io](https://crates.io/crates/tungsten-cli) to avoid conflicts. Once installed, the CLI command is simply **`tungsten`**.
+        :::
+    </TabItem>
+</Tabs>
+
+:::tip[Recommended]
+If you are working on a team project, we highly recommend using a **toolchain manager** (like Rokit or Aftman). This ensures that every developer on your team uses the exact same version of Tungsten, eliminating "it works on my machine" issues.
+:::
+
+## Verification
+Once installed, verify that the binary is correctly linked to your system path by checking the version:
+```bash title="Terminal"
+tungsten --version
+```
+
+If successful, you will see the current version:
+```bash title="Terminal"
+tungsten 2.1.1
+```
+
+Congratulations, you have successfully installed Tungsten!

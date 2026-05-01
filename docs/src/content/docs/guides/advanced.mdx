@@ -1,0 +1,90 @@
+---
+title: Advanced Workflows
+description: Explore Tungsten's power-user features, including live watch mode, automatic high DPI scaling, and CI/CD integration.
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+Once you have mastered basic syncing and asset packing, you can leverage Tungsten's power-user features to build a hands-off, fully automated asset pipeline. This guide covers how to optimize your development loop, perform on-the-fly asset conversions, and integrate Tungsten into your CI/CD processes.
+
+## Live Watch Mode
+
+`tungsten watch` is the foundation of a modern, efficient developer loop. Instead of manually executing sync for every minor change, Tungsten maintains a persistent connection to your project directory.
+
+Any modification to your assets. Whether you are adding a new icon, updating a texture, or tweaking a sprite. Triggers an immediate, incremental sync. This keeps your local development environment perfectly in sync with the Roblox cloud.
+
+### Usage
+
+Start the watcher in your terminal:
+
+```bash title="Terminal"
+tungsten watch cloud
+```
+
+:::note
+This command will block your terminal until terminated (typically via `Ctrl + C`).
+:::
+
+## Asset Conversion
+
+Tungsten allows you to transform asset formats during the sync process without modifying your source files. This is useful for maintaining high-quality master assets (like SVGs) while uploading optimized versions (like PNGs) to Roblox.
+
+You can define conversion rules within your `[inputs.<name>]` blocks in tungsten.toml.
+
+### Syntax
+
+Conversion rules are defined as a list of strings using the -> operator. You can target specific files or entire file types:
+
+- Format Conversion: `"svg -> png"` (Converts all SVGs to PNGs).
+- Specific File Conversion: `"logo.svg -> logo.png"` (Converts only a specific file).
+
+### Example
+
+```toml title="tungsten.toml"
+[inputs.icons]
+path = "assets/icons/**/*"
+output_path = "src/Icons.luau"
+convert = [
+    "svg -> png",
+    "special_button.svg -> special_button.jpg"
+]
+```
+
+## TypeScript Declarations
+
+If your project utilizes TypeScript or requires strict typing for your assets, Tungsten can automatically generate declaration files (`.d.ts`).
+
+Set `ts_declaration = true` in your `[codegen]` block. This ensures that your IDE provides autocompletion and type-checking for your asset paths, preventing runtime errors caused by typos or missing files.
+
+## High DPI Detection
+
+Tungsten is built to handle high-resolution displays natively. There is no need for manual configuration or settings; Tungsten automatically detects standard high-resolution suffixes (such as @2x or @3x) in your asset filenames.
+
+Upon detection, Tungsten automatically generates Luau helper functions that allow you to toggle between DPI scales. This keeps your images crisp and properly sized on high-DPI displays without additional overhead.
+
+## CI/CD Integration
+
+For teams or larger projects, you should avoid syncing assets from individual local machines. Tungsten is able to do CI/CD integration.
+
+By utilizing the `TUNGSTEN_GLOBAL_APIKEY` environment variable in your GitHub Actions or GitLab CI runners, you can fully automate your asset pipeline.
+
+<Steps>
+
+1. #### Configure Secret
+
+   Define `TUNGSTEN_GLOBAL_APIKEY` as a protected secret in your repository settings.
+
+2. #### Automate Sync
+
+   Add a step to your CI workflow to run tungsten sync cloud.
+
+3. #### Validate First
+   Always use the `--dry-run` flag in your CI pipeline to validate your configuration, packing logic, and file structure without consuming your upload quota.
+
+</Steps>
+
+:::tip
+Using `--dry-run` on every push ensures that no broken assets or misconfigured packs ever reach your production environment.
+:::
+
+Congratulations on mastering the Tungsten pipeline! We hope you have a great experience using Tungsten!

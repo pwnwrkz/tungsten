@@ -1,0 +1,95 @@
+---
+title: Your First Sync
+description: Learn the fundamentals of Tungsten by configuring your environment, authenticating your session, and syncing your first asset.
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+import { FileTree } from '@astrojs/starlight/components';
+
+Welcome to your first step with Tungsten. By the end of this guide, you will have your project configured, your authentication secure, and your first asset safely synced to your Roblox place.
+
+## Initializing your Project
+Tungsten is designed to be "zero-config" where possible, but it needs to know where your assets live and which Roblox target (User or Group) you are syncing to.
+
+Open your terminal, navigate to your project directory, and run:
+
+```bash title="Terminal"
+tungsten init
+```
+
+### What just happened?
+Running init scanned your directory and generated a tungsten.toml configuration file. This file is the "brain" of your project.
+
+## Configuring your Project
+
+Open your newly created tungsten.toml in your preferred code editor. You need to define your creator_id so Tungsten knows where your assets are going.
+```toml title="tungsten.toml"
+# Set your User or Group ID here
+creator_id = 12345678
+```
+
+## Authenticating with Roblox
+
+Tungsten requires an API key with Asset Write and Read permissions to function. You have three ways to provide this key, depending on your security preference:
+### Option A: Environment Variable (Recommended for CI/CD)
+
+Set the variable globally in your system or terminal session:
+```bash title="Terminal"
+export TUNGSTEN_GLOBAL_APIKEY="your-api-key-here"
+```
+
+### Option B: Local `.env` File
+
+Create a file named `tungsten_api_key.env` in your project root like this:
+
+<FileTree>
+
+- assets
+  - ...
+- tungsten.toml
+- **tungsten_api_key.env**
+
+</FileTree>
+
+```txt title="tungsten_api_key.env"
+API_KEY=your-api-key-here
+```
+
+:::danger
+Never commit your `.env` file or API keys to GitHub. Ensure your `.gitignore` includes `*.env`.
+:::
+
+### Option C: The CLI Flag
+
+If you want to use a key only for a specific run, pass it directly in your command:
+```bash title="Terminal"
+tungsten sync cloud --api-key="your-api-key-here"
+```
+
+## Placing your Assets
+
+Now, all you have to do is place your assets! Simply drop your assets into the folders where you assigned in your inputs.
+
+Tungsten will automatically pick up this file on the next sync. You can create a .tmeta file next to it later if you need custom names or descriptions, but for now, the defaults will handle the heavy lifting.
+
+## The Sync
+
+Now that your config is set and your assets are ready, it's time to push to the cloud.
+
+Run the following command:
+```bash title="Terminal"
+tungsten sync cloud
+```
+
+You should see Tungsten spring into action:
+
+<Steps>
+
+1. It validates your `tungsten.toml`.
+2. It authenticates using your provided API key.
+3. It detects the new file in your `assets/` folder.
+4. It uploads the asset and returns the asset ID.
+
+</Steps>
+
+Congratulations! You have successfully synced your first asset. You can now use the returned ID in your Roblox projects.
