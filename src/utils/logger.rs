@@ -93,5 +93,5 @@ pub fn clear_progress_line() {
     print!("\r{:<120}\r", "");
     std::io::stdout()
         .flush()
-        .expect("Failed to flush stdout while clearing progress line");
+        .expect("Failed to flush stdout while clearing progress line (this may indicate a system I/O error or broken pipe)");
 }
