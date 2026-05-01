@@ -83,7 +83,7 @@ pub fn progress(phase: &str, current: usize, total: usize, item: &str) {
         print!("\r{}", line);
         std::io::stdout()
             .flush()
-            .expect("Failed to flush stdout while updating progress display");
+            .expect("Failed to flush stdout during progress update (this may indicate a system I/O error or broken pipe)");
     }
 }
 
