@@ -25,30 +25,29 @@ tungsten watch cloud
 This command will block your terminal until terminated (typically via `Ctrl + C`).
 :::
 
-## Asset Conversion
+## Image Compression
 
-Tungsten allows you to transform asset formats during the sync process without modifying your source files. This is useful for maintaining high-quality master assets (like SVGs) while uploading optimized versions (like PNGs) to Roblox.
+To optimize for performance and reduce loading times for your players, Tungsten can perform local, high-efficiency image compression before uploading your assets. This is an opt-in feature powered by the libcaesium engine, allowing you to strike a balance between visual fidelity and memory footprint.
 
-You can define conversion rules within your `[inputs.<name>]` blocks in tungsten.toml.
+### How it works
 
-### Syntax
+Compression is configured on a per-input basis within your tungsten.toml. When the compress_options table is present, Tungsten intercepts the sync process to optimize your images locally.
 
-Conversion rules are defined as a list of strings using the -> operator. You can target specific files or entire file types:
+This is particularly useful for:
 
-- Format Conversion: `"svg -> png"` (Converts all SVGs to PNGs).
-- Specific File Conversion: `"logo.svg -> logo.png"` (Converts only a specific file).
+- **Background Textures**: High-resolution JPEGs can be significantly compressed with minimal visual loss.
+- **UI Icons**: Stripping metadata from PNGs ensures your icons use the least amount of space possible.
+- **Large Spritesheets**: Reducing the "weight" of a packed sheet improves reliability when syncing over slower connections.
 
-### Example
+Why use it?
 
-```toml title="tungsten.toml"
-[inputs.icons]
-path = "assets/icons/**/*"
-output_path = "src/Icons.luau"
-convert = [
-    "svg -> png",
-    "special_button.svg -> special_button.jpg"
-]
-```
+- **Faster Initial Load**: Smaller assets appear faster for players, especially on mobile devices or limited bandwidth.
+- **Privacy**: By defaulting keep_metadata to false, you ensure that hidden data (like export timestamps or software signatures) is stripped before the asset reaches the Roblox cloud.
+- **Zero-Cloud Processing**: All compression happens on your machine. Your raw, uncompressed assets never leave your computer, and no third-party services are used to process your data.
+
+:::note[Info]
+For a full breakdown of the available compression fields, including quality and metadata settings, refer to the [Configuration Reference](/tungsten/reference/configuration).
+:::
 
 ## TypeScript Declarations
 

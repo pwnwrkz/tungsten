@@ -27,7 +27,7 @@ h6 {
 }
 
 :root[data-theme="light"] .hero h1 {
-    color: #2F343B;
+    color: #2f343b;
 }
 
 :root[data-theme="dark"] .hero h1 {
