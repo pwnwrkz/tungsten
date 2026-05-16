@@ -3,71 +3,20 @@ title: Meta Files
 description: A reference on how meta files work with Tungsten.
 ---
 
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree } from "@astrojs/starlight/components";
 
 Meta files (`.tmeta`) allow you to customize the metadata of your assets, such as their names and descriptions—on the Roblox website.
 
-## Asset Metadata
+## Full example
 
-To apply metadata to a specific asset, create a file with the same name as the asset, with it's file format changed to `.tmeta`.
-
-Example:
-
-<FileTree>
-
-- assets/
-  - logo.png
-  - **logo.png.tmeta**
-
-</FileTree>
-
-Inside `logo.png.tmeta`:
-
-```toml title="logo.tmeta"
-name = "Official Project Logo"
-description = "The high-resolution logo used for the main menu."
+```txt
+name = "Tungsten Meta Files"
+description = "Look I have a custom description!"
 ```
-
-## Spritesheet Naming
-
-When using `packable = true`, Tungsten generates spritesheets automatically. By default, these have generic names. You can use a folder-level meta file to give them a custom prefix.
-
-If you have a folder being packed, place a `.tmeta` file with the same name as the folder in the same directory.
-
-Example Structure:
-
-<FileTree>
-
-- assets/
-  - icons/
-    - shop.png
-    - settings.png
-    - play.png
-  - **icons.tmeta**
-
-</FileTree>
-
-Inside icons.tmeta:
-
-```toml title="icons.tmeta"
-name = "UIIcons"
-description = "Icons for the user interface."
-```
-
-When Tungsten uploads the generated spritesheets, they will appear in your Roblox inventory as:
-
-- `UIIcons_001`
-- `UIIcons_002`
-
-...and so on.
 
 ## Field Reference
 
 | Field         | Type     | Description                                                   |
 | ------------- | -------- | ------------------------------------------------------------- |
 | `name`        | `string` | The display name of the asset or spritesheet on Roblox.       |
-| `description` |	`string` | The description text that appears on the asset's Roblox page. |
-
-:::tip
-Custom names are especially useful for keeping your Create dashboard organized, making it much easier to find specific spritesheets or high-res backgrounds later.
-:::
+| `description` | `string` | The description text that appears on the asset's Roblox page. |
