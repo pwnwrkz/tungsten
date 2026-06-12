@@ -13,7 +13,6 @@
 # Documentation
 
 Read the Tungsten documentation [here](https://pwnwrkz.github.io/tungsten)
-tt
 
 # AI Disclosure
 
@@ -33,8 +32,8 @@ We do not directly support generative AI in any way, but we do support AI as an 
 
 ### Special Thanks
 
-- [Jack Taylor](https://github.com/jackTabsCode) - Asphalt
-- [The Rojo Team](https://github.com/rojo-rbx) and [Roblox](https://github.com/Roblox) - Tarmac
+- [Jack Taylor](https://github.com/jackTabsCode) - [Asphalt](https://github.com/jackTabsCode/asphalt)
+- [The Rojo Team](https://github.com/rojo-rbx) and [Roblox](https://github.com/Roblox) - Tarmac ([Rojo](https://github.com/rojo-rbx/tarmac) or [Roblox](https://github.com/Roblox/tarmac) repository)
 
 ### Crates used by Tungsten
 
