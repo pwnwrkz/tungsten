@@ -7,6 +7,12 @@ import { FileTree } from "@astrojs/starlight/components";
 
 Meta files (`.tmeta`) allow you to customize the metadata of your assets, such as their names and descriptions—on the Roblox website.
 
+## File Naming Conventions
+
+Tungsten looks for meta files using this priority:
+1. **For files**: First tries `name.format.tmeta` (e.g., `logo.png.tmeta`), then falls back to `name.tmeta` (e.g., `logo.tmeta`)
+2. **For directories**: Uses `name.tmeta` (e.g., `icons.tmeta`)
+
 ## Full example
 
 ```txt
