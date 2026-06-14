@@ -56,7 +56,7 @@ tungsten sync <target> [flags]
 | -------- | ------------------------------------------------------------------------------------------- |
 | `cloud`  | Uploads assets directly to the Roblox Open Cloud API.                                       |
 | `studio` | Syncs assets to your local Roblox Studio instance.                                          |
-| `debug`  | Creates a `.tungsten_debug` folder, allowing you to inspect the final output before upload. |
+| `debug`  | Creates a `.tungsten-debug` folder, allowing you to inspect the final output before upload. |
 
 ### Flags
 
@@ -83,7 +83,7 @@ tungsten watch <target> [flags]
 | -------- | ------------------------------------------------------------------------------------------- |
 | `cloud`  | Uploads assets directly to the Roblox Open Cloud API.                                       |
 | `studio` | Syncs assets to your local Roblox Studio instance.                                          |
-| `debug`  | Creates a `.tungsten_debug` folder, allowing you to inspect the final output before upload. |
+| `debug`  | Creates a `.tungsten-debug` folder, allowing you to inspect the final output before upload. |
 
 ### Flags
 
