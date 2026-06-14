@@ -24,11 +24,13 @@ Running init scanned your directory and generated a tungsten.toml configuration 
 
 ## Configuring your Project
 
-Open your newly created tungsten.toml in your preferred code editor. You need to define your creator_id so Tungsten knows where your assets are going.
+Open your newly created tungsten.toml in your preferred code editor. You need to define your creator so Tungsten knows where your assets are going.
 
 ```toml title="tungsten.toml"
-# Set your User or Group ID here
-creator_id = 12345678
+[creator]
+# Set your User ID or Group ID here, and specify the type
+type = "user"  # or "group"
+id = 12345678
 ```
 
 ## Authenticating with Roblox
