@@ -20,7 +20,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install, build, and upload
-        uses: withastro/action@v6.4.8
+        uses: withastro/action@v6
         with:
           path: docs
 
