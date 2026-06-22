@@ -2,7 +2,7 @@
 
 Thanks for your interest in contributing to Tungsten! Before that, please read through this guide before opening a PR or issue.
 
------
+---
 
 ## Table of Contents
 
@@ -12,25 +12,27 @@ Thanks for your interest in contributing to Tungsten! Before that, please read t
 - [Pull Requests](#pull-requests)
 - [AI Usage Policy](#ai-usage-policy)
 
------
+---
 
 ## Getting Started
 
 1. Fork the repository and clone it locally.
 1. Make sure you have [Rust](https://www.rust-lang.org/tools/install) installed.
 1. Build the project:
-   
+
    ```sh
    cargo build
    ```
+
 1. Run tests before making changes to ensure everything passes:
-   
+
    ```sh
    cargo test
    ```
+
 1. Create a new branch from `main` before making any changes (see [Branch Naming](#branch-naming)).
 
------
+---
 
 ## Branch Naming
 
@@ -42,15 +44,15 @@ Branches should follow this pattern:
 
 Use lowercase and underscores, no spaces or special characters.
 
-|Type      |When to use                             |
-|----------|----------------------------------------|
-|`feat`    |New feature                             |
-|`fix`     |Bug fix                                 |
-|`docs`    |Documentation updates                   |
-|`refactor`|Code restructure with no behavior change|
-|`test`    |Adding or updating tests                |
-|`chore`   |Tooling, dependencies, config           |
-|`ci`      |CI/CD changes                           |
+| Type       | When to use                              |
+| ---------- | ---------------------------------------- |
+| `feat`     | New feature                              |
+| `fix`      | Bug fix                                  |
+| `docs`     | Documentation updates                    |
+| `refactor` | Code restructure with no behavior change |
+| `test`     | Adding or updating tests                 |
+| `chore`    | Tooling, dependencies, config            |
+| `ci`       | CI/CD changes                            |
 
 **Examples:**
 
@@ -62,7 +64,7 @@ chore/bump_dependencies
 refactor/asset_resolver_cleanup
 ```
 
------
+---
 
 ## Commit Messages
 
@@ -80,18 +82,18 @@ This project follows the [Conventional Commits](https://www.conventionalcommits.
 
 ### Types
 
-|Type      |When to use                               |
-|----------|------------------------------------------|
-|`feat`    |New feature                               |
-|`fix`     |Bug fix                                   |
-|`docs`    |Documentation changes                     |
-|`style`   |Formatting, whitespace (no logic change)  |
-|`refactor`|Code restructure (no feature/fix)         |
-|`test`    |Adding or updating tests                  |
-|`chore`   |Build process, dependency updates, tooling|
-|`perf`    |Performance improvements                  |
-|`ci`      |CI/CD configuration changes               |
-|`revert`  |Reverting a previous commit               |
+| Type       | When to use                                |
+| ---------- | ------------------------------------------ |
+| `feat`     | New feature                                |
+| `fix`      | Bug fix                                    |
+| `docs`     | Documentation changes                      |
+| `style`    | Formatting, whitespace (no logic change)   |
+| `refactor` | Code restructure (no feature/fix)          |
+| `test`     | Adding or updating tests                   |
+| `chore`    | Build process, dependency updates, tooling |
+| `perf`     | Performance improvements                   |
+| `ci`       | CI/CD configuration changes                |
+| `revert`   | Reverting a previous commit                |
 
 ### Rules
 
@@ -126,21 +128,21 @@ existing behavior.
 Closes #18
 ```
 
------
+---
 
 ## Pull Requests
 
 - Keep PRs focused, one feature or fix per PR.
 - Reference any related issues in the PR description (e.g. `Closes #42`).
 - Ensure `cargo test` and `cargo clippy` pass before requesting a review.
-- Provide a clear summary of *what* changed and *why*.
+- Provide a clear summary of _what_ changed and _why_.
 
------
+---
 
 ## AI Usage Policy
 
 AI-assisted contributions are welcome, provided they meet the following conditions in the [policy](AI_POLICY.md).
 
------
+---
 
-*Thanks again for contributing to Tungsten!*
+_Thanks again for contributing to Tungsten!_
