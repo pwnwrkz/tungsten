@@ -8,17 +8,12 @@
     <p>Designed originally for images, Tungsten mimics Asphalt and Tarmac closely, with spritesheet packing that Asphalt lacks.</p>
     <p>Originally built for <a href="https://github.com/notmagniill/LucideRoblox">LucideRoblox</a>.</p>
     <p><b>Tungsten is currently tested only for Windows, beware if some things break on Mac or Linux.</b></p>
+    <br>
 </div>
 
 # Documentation
 
 Read the Tungsten documentation [here](https://pwnwrkz.github.io/tungsten)
-
-# AI Disclosure
-
-Tungsten may use AI generated improvements to certain parts of the code with AI findings from GitHub, everything else is crafted by the team directly.
-
-We do not directly support generative AI in any way, but we do support AI as an assistant.
 
 # Credits
 
@@ -34,33 +29,3 @@ We do not directly support generative AI in any way, but we do support AI as an 
 
 - [Jack Taylor](https://github.com/jackTabsCode) - [Asphalt](https://github.com/jackTabsCode/asphalt)
 - [The Rojo Team](https://github.com/rojo-rbx) and [Roblox](https://github.com/Roblox) - Tarmac ([Rojo](https://github.com/rojo-rbx/tarmac) or [Roblox](https://github.com/Roblox/tarmac) repository)
-
-### Crates used by Tungsten
-
-<details>
-<summary><i>View the full crate list</i></summary>
-
-- [dtolnay](https://github.com/dtolnay) - anyhow
-- [contain-rs](https://github.com/contain-rs) - bit-vec
-- [clap-rs](https://github.com/clap-rs) - clap
-- [colored-rs](https://github.com/colored-rs) - colored
-- [ChevyRay](https://github.com/ChevyRay) - crunch
-- [rust-lang](https://github.com/rust-lang) - glob
-- [KokaKiwi](https://github.com/KokaKiwi) - hex
-- [image-rs](https://github.com/image-rs) - image
-- [Lymphatus](https://github.com/Lymphatus) - libcaesium
-- [notify-rs](https://github.com/notify-rs) - notify
-- [rayon-rs](https://github.com/rayon-rs) - rayon
-- [seanmonstar](https://github.com/seanmonstar) - reqwest
-- [serde-rs](https://github.com/serde-rs) - serde and serde_json
-- [RustCrypto](https://github.com/RustCrypto) - sha2
-- [Stebalien](https://github.com/Stebalien) - tempfile
-- [tokio-rs](https://github.com/tokio-rs) - tokio
-- [toml-rs](https://github.com/toml-rs) - toml
-- [linebender](https://github.com/linebender) - resvg, tiny-skia and usvg
-- [Kampfkarren](https://github.com/Kampfkarren) - roblox_install
-</details>
-
-<div align="center">
-    <p><b>Tungsten is licensed under the GNU GPLv3. Please note that this is a copyleft license: any derivative works or projects incorporating this code must be released as open-source under the same terms.</b></p>
-</div>
