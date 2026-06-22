@@ -228,7 +228,8 @@ mod tests {
             <svg width="10" height="10" xmlns="http://www.w3.org/2000/svg">
                 <circle cx="5" cy="5" r="4" fill="currentColor"/>
             </svg>
-        "#.as_bytes();
+        "#
+        .as_bytes();
 
         let png_bytes = svg_to_png(svg_data, 1.0).expect("Failed to convert SVG");
         let img = image::load_from_memory(&png_bytes).expect("Failed to load PNG");
