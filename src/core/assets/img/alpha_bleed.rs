@@ -21,56 +21,56 @@ use image::{Rgba, RgbaImage};
 use std::collections::VecDeque;
 
 pub fn alpha_bleed(img: &mut RgbaImage) {
-    let (w, h) = img.dimensions();
-    if w == 0 || h == 0 {
+    let (width, height) = img.dimensions();
+    if width == 0 || height == 0 {
         return;
     }
 
-    let len = (w * h) as usize;
+    let pixel_count = (width * height) as usize;
 
     // can_be_sampled: pixel has a stable color that neighbours may average.
     // visited:        pixel is already enqueued or processed — don't enqueue again.
-    let mut can_be_sampled = BitVec::from_elem(len, false);
-    let mut visited = BitVec::from_elem(len, false);
+    let mut can_be_sampled = BitVec::from_elem(pixel_count, false);
+    let mut visited = BitVec::from_elem(pixel_count, false);
 
     // Init pass
     //
     // Mark every opaque pixel as samplable + visited.
     // Simultaneously seed the BFS queue with transparent pixels that border
     // at least one opaque pixel, checking only the 4 cardinal neighbours to
-    // keep the scan O(w*h) with no inner allocations.
+    // keep the scan O(width*height) with no inner allocations.
     let pixels = img.as_raw(); // flat RGBA bytes, row-major
-    let mut current: VecDeque<u32> = VecDeque::new();
+    let mut current_wave: VecDeque<u32> = VecDeque::new();
 
-    for i in 0..len {
-        let alpha = pixels[i * 4 + 3];
+    for index in 0..pixel_count {
+        let alpha = pixels[index * 4 + 3];
         if alpha != 0 {
-            can_be_sampled.set(i, true);
-            visited.set(i, true);
+            can_be_sampled.set(index, true);
+            visited.set(index, true);
         }
     }
 
     // Seed: transparent pixels adjacent to any opaque pixel.
     // We check all 8 neighbors here too for correctness, but without Vec allocs.
-    for y in 0..h {
-        for x in 0..w {
-            let i = (x + y * w) as usize;
-            if can_be_sampled[i] {
+    for y in 0..height {
+        for x in 0..width {
+            let index = (x + y * width) as usize;
+            if can_be_sampled[index] {
                 continue; // already opaque
             }
             // Check 8 neighbours via clamped coordinates.
-            let borders_opaque = OFFSETS_8.iter().any(|&(dx, dy)| {
-                let nx = x as i32 + dx;
-                let ny = y as i32 + dy;
-                nx >= 0
-                    && ny >= 0
-                    && nx < w as i32
-                    && ny < h as i32
-                    && can_be_sampled[(nx as u32 + ny as u32 * w) as usize]
+            let borders_opaque = OFFSETS_8.iter().any(|&(delta_x, delta_y)| {
+                let neighbor_x = x as i32 + delta_x;
+                let neighbor_y = y as i32 + delta_y;
+                neighbor_x >= 0
+                    && neighbor_y >= 0
+                    && neighbor_x < width as i32
+                    && neighbor_y < height as i32
+                    && can_be_sampled[(neighbor_x as u32 + neighbor_y as u32 * width) as usize]
             });
             if borders_opaque {
-                visited.set(i, true);
-                current.push_back(i as u32);
+                visited.set(index, true);
+                current_wave.push_back(index as u32);
             }
         }
     }
@@ -81,62 +81,66 @@ pub fn alpha_bleed(img: &mut RgbaImage) {
     // from pixels that were already stable (can_be_sampled) when its wave
     // began — preventing blended colors from propagating into later waves.
     //
-    // Two-queue swap: `current` holds this wave, `next` accumulates the next.
-    // After processing `current`, mark everything in it as samplable, then swap.
-    let mut next: VecDeque<u32> = VecDeque::new();
+    // Two-queue swap: `current_wave` holds this wave, `next_wave` accumulates the next.
+    // After processing `current_wave`, mark everything in it as samplable, then swap.
+    let mut next_wave: VecDeque<u32> = VecDeque::new();
 
     // Safety: we access the raw pixel slice directly to avoid bounds checks in
     // the inner loop. All index arithmetic is guarded by the coord clamp above.
     let pixels = img.as_mut(); // &mut [u8]
 
-    while !current.is_empty() {
+    while !current_wave.is_empty() {
         // Process every pixel in the current wave.
-        for &flat in &current {
-            let i = flat as usize;
-            let x = flat % w;
-            let y = flat / w;
+        for &flat_index in &current_wave {
+            let index = flat_index as usize;
+            let x = flat_index % width;
+            let y = flat_index / width;
 
-            let mut r = 0u32;
-            let mut g = 0u32;
-            let mut b = 0u32;
-            let mut count = 0u32;
+            let mut red_sum = 0u32;
+            let mut green_sum = 0u32;
+            let mut blue_sum = 0u32;
+            let mut sample_count = 0u32;
 
-            for &(dx, dy) in OFFSETS_8.iter() {
-                let nx = x as i32 + dx;
-                let ny = y as i32 + dy;
-                if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+            for &(delta_x, delta_y) in OFFSETS_8.iter() {
+                let neighbor_x = x as i32 + delta_x;
+                let neighbor_y = y as i32 + delta_y;
+                if neighbor_x < 0
+                    || neighbor_y < 0
+                    || neighbor_x >= width as i32
+                    || neighbor_y >= height as i32
+                {
                     continue;
                 }
-                let ni = (nx as u32 + ny as u32 * w) as usize;
-                if can_be_sampled[ni] {
-                    let base = ni * 4;
-                    r += pixels[base] as u32;
-                    g += pixels[base + 1] as u32;
-                    b += pixels[base + 2] as u32;
-                    count += 1;
-                } else if !visited[ni] {
-                    visited.set(ni, true);
-                    next.push_back(ni as u32);
+                let neighbor_index = (neighbor_x as u32 + neighbor_y as u32 * width) as usize;
+                if can_be_sampled[neighbor_index] {
+                    let base = neighbor_index * 4;
+                    red_sum += pixels[base] as u32;
+                    green_sum += pixels[base + 1] as u32;
+                    blue_sum += pixels[base + 2] as u32;
+                    sample_count += 1;
+                } else if !visited[neighbor_index] {
+                    visited.set(neighbor_index, true);
+                    next_wave.push_back(neighbor_index as u32);
                 }
             }
 
-            #[allow(clippy::manual_checked_ops)] // count > 0 guard makes this safe
-            if count > 0 {
-                let base = i * 4;
-                pixels[base] = (r / count) as u8;
-                pixels[base + 1] = (g / count) as u8;
-                pixels[base + 2] = (b / count) as u8;
+            #[allow(clippy::manual_checked_ops)] // sample_count > 0 guard makes this safe
+            if sample_count > 0 {
+                let base = index * 4;
+                pixels[base] = (red_sum / sample_count) as u8;
+                pixels[base + 1] = (green_sum / sample_count) as u8;
+                pixels[base + 2] = (blue_sum / sample_count) as u8;
                 // pixels[base + 3] stays 0 — alpha is never written
             }
         }
 
         // Mark everything processed in this wave as samplable for the next.
-        for &flat in &current {
-            can_be_sampled.set(flat as usize, true);
+        for &flat_index in &current_wave {
+            can_be_sampled.set(flat_index as usize, true);
         }
 
-        std::mem::swap(&mut current, &mut next);
-        next.clear();
+        std::mem::swap(&mut current_wave, &mut next_wave);
+        next_wave.clear();
     }
 }
 

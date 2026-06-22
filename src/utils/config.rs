@@ -111,6 +111,9 @@ pub struct InputConfig {
     pub packable: Option<bool>,
     /// Scale factor applied when rasterizing SVG files (default: 1.0).
     pub svg_scale: Option<f32>,
+    /// Whether to apply alpha bleeding to images (default: true).
+    /// When false, skips the alpha bleeding step to preserve original transparent borders.
+    pub bleed: Option<bool>,
     /// If present, compress images before upload using libcaesium.
     /// Omit the section entirely to skip compression.
     pub compress_options: Option<CompressOptions>,
@@ -126,6 +129,11 @@ impl InputConfig {
     /// for this input, or `None` if the `compress_options` section was omitted.
     pub fn resolved_compress_options(&self) -> Option<ResolvedCompressOptions> {
         self.compress_options.as_ref().map(|o| o.resolve())
+    }
+
+    /// Returns whether alpha bleeding should be applied (defaults to true).
+    pub fn resolved_bleed(&self) -> bool {
+        self.bleed.unwrap_or(true)
     }
 }
 

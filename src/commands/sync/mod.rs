@@ -161,6 +161,7 @@ pub async fn run(
         let svg_scale = input.resolved_svg_scale();
         let compress_options = input.resolved_compress_options();
         let compress_opts_ref = compress_options.as_ref();
+        let bleed = input.resolved_bleed();
 
         let (image_paths, other_paths): (Vec<_>, Vec<_>) = paths.into_iter().partition(|p| {
             let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -279,6 +280,7 @@ pub async fn run(
                     strip_extension,
                     ts_declaration,
                     compress_opts_ref,
+                    bleed,
                     target,
                     dry_run,
                     &creator,
@@ -300,6 +302,7 @@ pub async fn run(
                     strip_extension,
                     ts_declaration,
                     compress_opts_ref,
+                    bleed,
                     target,
                     dry_run,
                     &creator,

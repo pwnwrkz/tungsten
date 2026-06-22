@@ -124,9 +124,43 @@ pub struct AssetMeta {
 
 impl AssetMeta {
     /// Try to load a `.tmeta` sidecar next to `asset_path`.
+    /// For files, first tries `name.format.tmeta` (e.g., `image.png.tmeta`),
+    /// then falls back to `name.tmeta` (e.g., `image.tmeta`).
+    /// For directories, uses `name.tmeta` (e.g., `icons.tmeta`).
     /// Returns `Default::default()` (all `None`) if no sidecar exists.
     pub fn load_for(asset_path: &Path) -> Result<Self> {
-        let tmeta_path = asset_path.with_extension("tmeta");
+        // Try the more specific format first for files: name.format.tmeta
+        let mut tmeta_path = asset_path.to_path_buf();
+
+        if asset_path.is_file() {
+            // For files: try name.format.tmeta first (e.g., image.png.tmeta)
+            let extension = asset_path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("");
+            tmeta_path.set_extension(format!("{}.tmeta", extension));
+
+            if tmeta_path.exists() {
+                let contents = std::fs::read_to_string(&tmeta_path)
+                    .with_context(|| format!("Failed to read \"{}\"", tmeta_path.display()))?;
+
+                return toml::from_str(&contents)
+                    .with_context(|| format!("Failed to parse \"{}\"", tmeta_path.display()));
+            }
+
+            // Fall back to name.tmeta (e.g., image.tmeta)
+            tmeta_path = asset_path.with_extension("tmeta");
+            tmeta_path.set_file_name(format!(
+                "{}.tmeta",
+                asset_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+            ));
+        } else {
+            // For directories: use name.tmeta (e.g., icons.tmeta)
+            tmeta_path = asset_path.with_extension("tmeta");
+        }
 
         if !tmeta_path.exists() {
             return Ok(Self::default());
@@ -223,5 +257,68 @@ mod tests {
         let meta = AssetMeta::default();
         assert_eq!(meta.resolve_name("fallback"), "fallback");
         assert_eq!(meta.resolve_description("desc"), "desc");
+    }
+
+    #[test]
+    fn test_meta_file_naming_priority() {
+        use std::fs::File;
+        use std::io::Write;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.png");
+
+        // Create an empty file
+        File::create(&file_path).unwrap();
+
+        // Test 1: Specific format takes priority (.format.tmeta)
+        let specific_meta_path = temp_dir.path().join("test.png.tmeta");
+        let mut specific_file = File::create(&specific_meta_path).unwrap();
+        writeln!(specific_file, "name = \"Specific Format Name\"").unwrap();
+        writeln!(
+            specific_file,
+            "description = \"Specific format description\""
+        )
+        .unwrap();
+
+        let meta = AssetMeta::load_for(&file_path).unwrap();
+        assert_eq!(meta.name.as_deref(), Some("Specific Format Name"));
+        assert_eq!(
+            meta.description.as_deref(),
+            Some("Specific format description")
+        );
+
+        // Test 2: Fall back to general .tmeta when specific doesn't exist
+        std::fs::remove_file(&specific_meta_path).unwrap();
+        let general_meta_path = temp_dir.path().join("test.tmeta");
+        let mut general_file = File::create(&general_meta_path).unwrap();
+        writeln!(general_file, "name = \"General Meta Name\"").unwrap();
+        writeln!(general_file, "description = \"General meta description\"").unwrap();
+
+        let meta = AssetMeta::load_for(&file_path).unwrap();
+        assert_eq!(meta.name.as_deref(), Some("General Meta Name"));
+        assert_eq!(
+            meta.description.as_deref(),
+            Some("General meta description")
+        );
+
+        // Test 3: Directory meta files use name.tmeta
+        let dir_path = temp_dir.path().join("assets");
+        std::fs::create_dir(&dir_path).unwrap();
+        let dir_meta_path = temp_dir.path().join("assets.tmeta");
+        let mut dir_meta_file = File::create(&dir_meta_path).unwrap();
+        writeln!(dir_meta_file, "name = \"Assets Folder\"").unwrap();
+        writeln!(dir_meta_file, "description = \"Folder description\"").unwrap();
+
+        let dir_meta = AssetMeta::load_for(&dir_path).unwrap();
+        assert_eq!(dir_meta.name.as_deref(), Some("Assets Folder"));
+        assert_eq!(dir_meta.description.as_deref(), Some("Folder description"));
+
+        // Test 4: No meta files returns defaults
+        std::fs::remove_file(&general_meta_path).unwrap();
+        std::fs::remove_file(&dir_meta_path).unwrap();
+        let default_meta = AssetMeta::load_for(&file_path).unwrap();
+        assert_eq!(default_meta.name, None);
+        assert_eq!(default_meta.description, None);
     }
 }

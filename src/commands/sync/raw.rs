@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use rayon::prelude::*;
+use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 use crate::api::sync::debug::DebugSync;
@@ -59,6 +61,65 @@ fn maybe_compress(
     }
 }
 
+/// Process a single raw file for asset processing (synchronous version for parallel processing)
+fn process_single_raw_file(
+    path: &PathBuf,
+    base_path: &str,
+    compress_options: Option<&CompressOptions>,
+) -> Result<RawPending, ProcessingError> {
+    // Read the file
+    let data = std::fs::read(path).map_err(|e| ProcessingError {
+        name: path.display().to_string(),
+        error: anyhow::anyhow!("Failed to read \"{}\": {}", path.display(), e),
+    })?;
+
+    let src_ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    let kind = match asset::kind_from_ext(&src_ext) {
+        Some(k) => k,
+        None => {
+            return Err(ProcessingError {
+                name: path.display().to_string(),
+                error: anyhow::anyhow!("Unsupported extension \"{}\"", src_ext),
+            });
+        }
+    };
+
+    let data = maybe_compress(data, &src_ext, compress_options);
+    let hash = hash_image(&data);
+    let meta = AssetMeta::load_for(path).unwrap_or_default();
+    let name = {
+        let rel = relative_path(path, base_path);
+        Path::new(&rel)
+            .with_extension("")
+            .to_string_lossy()
+            .replace('\\', "/")
+    };
+    let display_name = meta.resolve_name(&name).to_string();
+    let description = meta.resolve_description("Uploaded by Tungsten").to_string();
+
+    Ok(RawPending {
+        name,
+        path: path.clone(),
+        bytes: data,
+        hash,
+        kind,
+        display_name,
+        description,
+    })
+}
+
+/// Error type for asset processing failures
+#[derive(Debug)]
+struct ProcessingError {
+    name: String,
+    error: anyhow::Error,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn process_raw(
     input_name: &str,
@@ -77,70 +138,41 @@ pub async fn process_raw(
     debug_sync: &Option<Arc<DebugSync>>,
     lockfile: &mut Lockfile,
 ) -> u32 {
-    let mut errors: u32 = 0;
-    let mut pending: Vec<RawPending> = Vec::with_capacity(paths.len());
+    // Process files in parallel
+    let pending_results: Vec<Result<RawPending, ProcessingError>> = paths
+        .into_par_iter()
+        .map(|path| process_single_raw_file(&path, base_path, compress_options))
+        .collect::<Vec<_>>();
 
-    for path in &paths {
-        let data = match std::fs::read(path) {
-            Ok(d) => d,
+    // Collect results and count errors
+    let mut pending: Vec<RawPending> = Vec::new();
+    let mut errors = 0u32;
+    for result in pending_results {
+        match result {
+            Ok(p) => pending.push(p),
             Err(e) => {
                 clear_progress_line();
-                log!(warn, "Failed to read \"{}\": {}", path.display(), e);
+                log!(warn, "Failed to prepare file \"{}\": {}", e.name, e.error);
                 errors += 1;
-                continue;
             }
-        };
-
-        let src_ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_ascii_lowercase();
-
-        let kind = match asset::kind_from_ext(&src_ext) {
-            Some(k) => k,
-            None => {
-                clear_progress_line();
-                log!(warn, "Unsupported extension \"{}\" — skipping", src_ext);
-                errors += 1;
-                continue;
-            }
-        };
-
-        let data = maybe_compress(data, &src_ext, compress_options);
-        let hash = hash_image(&data);
-        let meta = AssetMeta::load_for(path).unwrap_or_default();
-        let name = {
-            let rel = relative_path(path, base_path);
-            Path::new(&rel)
-                .with_extension("")
-                .to_string_lossy()
-                .replace('\\', "/")
-        };
-        let display_name = meta.resolve_name(&name).to_string();
-        let description = meta.resolve_description("Uploaded by Tungsten").to_string();
-
-        pending.push(RawPending {
-            name,
-            path: path.clone(),
-            bytes: data,
-            hash,
-            kind,
-            display_name,
-            description,
-        });
+        }
     }
 
     let total = pending.len();
     let mut codegen_entries: Vec<CodegenEntry> = Vec::with_capacity(total);
+
+    // Configure upload concurrency limit (can be made configurable later)
+    const MAX_CONCURRENT_UPLOADS: usize = 10;
+    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_UPLOADS));
+
     let mut upload_tasks: JoinSet<Result<(String, u64, String)>> = JoinSet::new();
     let mut dispatched = 0usize;
 
-    for p in pending {
+    for p in &pending {
         if dry_run {
             dispatched += 1;
-            progress("Uploading", dispatched, total, &p.name);
-            codegen_entries.push(CodegenEntry::asset_id(p.name, 0));
+            progress("Uploading", dispatched, total, &p.name.as_str());
+            codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), 0));
             continue;
         }
 
@@ -162,8 +194,11 @@ pub async fn process_raw(
                     String::new()
                 };
                 lockfile.set_uri(input_name, p.hash.clone(), uri.clone());
-                progress("Copying", dispatched, total, &p.name);
-                codegen_entries.push(CodegenEntry::asset(p.name, codegen::AssetRef::Uri(uri)));
+                progress("Copying", dispatched, total, &p.name.as_str());
+                codegen_entries.push(CodegenEntry::asset(
+                    p.name.clone(),
+                    codegen::AssetRef::Uri(uri),
+                ));
             }
             Target::Debug => {
                 dispatched += 1;
@@ -181,43 +216,49 @@ pub async fn process_raw(
                     continue;
                 }
                 let fallback_id = lockfile.get(input_name, &p.hash).unwrap_or(0);
-                progress("Copying", dispatched, total, &p.name);
-                codegen_entries.push(CodegenEntry::asset_id(p.name, fallback_id));
+                progress("Copying", dispatched, total, &p.name.as_str());
+                codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), fallback_id));
             }
             Target::Cloud => {
                 if let Some(cached_id) = lockfile.get(input_name, &p.hash) {
                     dispatched += 1;
-                    progress("Uploading", dispatched, total, &p.name);
-                    codegen_entries.push(CodegenEntry::asset_id(p.name, cached_id));
+                    progress("Uploading", dispatched, total, &p.name.as_str());
+                    codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), cached_id));
                     continue;
                 }
                 let Some(c) = client else {
-                    codegen_entries.push(CodegenEntry::asset_id(p.name, 0));
+                    codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), 0));
                     continue;
                 };
                 let c_arc = Arc::clone(c);
                 let creator_own = creator.clone();
-                let file_name = p
-                    .path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned();
-                let name_clone = p.name.clone();
-                let hash_clone = p.hash.clone();
+                let p_path = p.path.clone();
+                let p_name = p.name.clone();
+                let p_hash = p.hash.clone();
+                let p_display_name = p.display_name.clone();
+                let p_description = p.description.clone();
+                let p_bytes = p.bytes.clone();
+                let p_kind = p.kind;
+                let semaphore_clone = semaphore.clone();
                 upload_tasks.spawn(async move {
+                    let _permit = semaphore_clone.acquire_owned().await;
+                    let file_name = p_path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
                     let id = c_arc
                         .upload(UploadParams {
                             file_name,
-                            display_name: p.display_name,
-                            description: p.description,
-                            data: p.bytes,
-                            kind: p.kind,
+                            display_name: p_display_name,
+                            description: p_description,
+                            data: p_bytes,
+                            kind: p_kind,
                             creator: creator_own,
                         })
                         .await
-                        .with_context(|| format!("Failed to upload \"{}\"", name_clone))?;
-                    Ok((name_clone, id, hash_clone))
+                        .with_context(|| format!("Failed to upload \"{}\"", &p_name))?;
+                    Ok((p_name, id, p_hash))
                 });
             }
         }

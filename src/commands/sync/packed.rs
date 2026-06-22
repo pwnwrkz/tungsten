@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -45,6 +44,7 @@ pub async fn process_packed(
     strip_extension: bool,
     ts_declaration: bool,
     compress_options: Option<&CompressOptions>,
+    bleed: bool,
     target: Target,
     dry_run: bool,
     creator: &Creator,
@@ -69,122 +69,33 @@ pub async fn process_packed(
     let (dpi_groups, plain_images) = group_dpi_variants(images);
     let mut codegen_entries: Vec<CodegenEntry> = Vec::new();
 
-    // DPI groups
+    // DPI groups - skip packing and uploading, create codegen entries with placeholder IDs
+    // These go on a waitlist for manual upload later
     if !dpi_groups.is_empty() {
-        let mut all_scales: std::collections::BTreeSet<u8> = std::collections::BTreeSet::new();
-        for variants in dpi_groups.values() {
-            for &(scale, _) in variants {
-                all_scales.insert(scale);
-            }
-        }
-
-        let mut dpi_ids: HashMap<String, Vec<(u8, u64)>> = HashMap::new();
-
-        for scale in all_scales {
-            let scale_images: Vec<pack::InputImage> = dpi_groups
-                .iter()
-                .filter_map(|(base, variants)| {
-                    variants
-                        .iter()
-                        .find(|(s, _)| *s == scale)
-                        .map(|(_, img)| pack::InputImage {
-                            name: base.clone(),
-                            image: img.image.clone(),
-                        })
-                })
-                .collect();
-
-            if scale_images.is_empty() {
-                continue;
+        for (base_name, variants) in dpi_groups {
+            // Extract unique scales and create placeholder variant data for codegen
+            let mut scales: std::collections::HashSet<u8> = std::collections::HashSet::new();
+            for &(scale, _) in variants.iter() {
+                scales.insert(scale);
             }
 
-            log!(
-                info,
-                "Packing {}x ({} image(s))...",
-                scale,
-                scale_images.len()
-            );
+            // Convert to sorted vector for consistent codegen
+            let mut scale_vec: Vec<u8> = scales.into_iter().collect();
+            scale_vec.sort();
 
-            let spritesheets = match pack::pack(scale_images) {
-                Ok(s) => s,
-                Err(e) => {
-                    clear_progress_line();
-                    log!(warn, "Failed to pack {}x images: {}", scale, e);
-                    errors += 1;
-                    continue;
-                }
-            };
+            // Create placeholder variants with ID 0 (will be updated during manual upload)
+            let placeholder_variants: Vec<(u8, u64)> =
+                scale_vec.iter().map(|&scale| (scale, 0)).collect();
 
-            for (idx, sheet) in spritesheets.iter().enumerate() {
-                let mut sheet_image = sheet.image.clone();
-                alpha_bleed(&mut sheet_image);
-
-                let png_bytes = match encode_png(&sheet_image) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        clear_progress_line();
-                        log!(
-                            warn,
-                            "Failed to encode {}x sheet #{}: {}",
-                            scale,
-                            idx + 1,
-                            e
-                        );
-                        errors += 1;
-                        continue;
-                    }
-                };
-
-                let png_bytes = maybe_compress_png(png_bytes, compress_options);
-                let hash = hash_image(&png_bytes);
-                let sheet_name = format!("{}_{}x_{:03}", sheet_base, scale, idx + 1);
-
-                let asset_ref = upload_or_copy_sheet(
-                    &png_bytes,
-                    &hash,
-                    &sheet_name,
-                    &sheet_description,
-                    input_name,
-                    target,
-                    dry_run,
-                    creator,
-                    client,
-                    studio_sync,
-                    debug_sync,
-                    lockfile,
-                )
-                .await;
-
-                let asset_ref = match asset_ref {
-                    Ok(r) => r,
-                    Err(e) => {
-                        log!(warn, "{}", e);
-                        errors += 1;
-                        continue;
-                    }
-                };
-
-                let asset_id = match &asset_ref {
-                    codegen::AssetRef::Id(id) => *id,
-                    codegen::AssetRef::Uri(_) => lockfile.get(input_name, &hash).unwrap_or(0),
-                };
-
-                for img in &sheet.images {
-                    dpi_ids
-                        .entry(img.name.clone())
-                        .or_default()
-                        .push((scale, asset_id));
-                }
-            }
-        }
-
-        for (name, mut variants) in dpi_ids {
-            variants.sort_by_key(|(s, _)| *s);
-            codegen_entries.push(CodegenEntry::dpi_group(name, variants));
+            // Create DPI group codegen entry
+            codegen_entries.push(CodegenEntry::dpi_group(
+                base_name.to_string(),
+                placeholder_variants,
+            ));
         }
     }
 
-    // Plain images
+    // Plain images - continue with normal packing and processing
     if !plain_images.is_empty() {
         log!(info, "Packing {} image(s)...", plain_images.len());
 
@@ -210,7 +121,9 @@ pub async fn process_packed(
         let sheet_total = spritesheets.len();
         for (idx, sheet) in spritesheets.iter().enumerate() {
             let mut sheet_image = sheet.image.clone();
-            alpha_bleed(&mut sheet_image);
+            if bleed {
+                alpha_bleed(&mut sheet_image);
+            }
 
             let png_bytes = match encode_png(&sheet_image) {
                 Ok(b) => b,
