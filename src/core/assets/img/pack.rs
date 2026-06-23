@@ -166,62 +166,6 @@ fn calculate_used_space(packed: &[crunch::PackedItem<InputImage>]) -> (usize, us
     (max_x, max_y)
 }
 
-/// Calculate a fully dynamic spritesheet size based on the images to be packed.
-///
-/// This function analyzes the dimensions of the input images and returns a
-/// sheet size that closely matches the actual space needed, similar to
-/// Adobe Animate's approach of sizing based solely on sprite dimensions
-/// without predefined size constraints.
-// fn calculate_optimal_sheet_size(images: &[InputImage]) -> usize {
-//     if images.is_empty() {
-//         return 64; // Minimum reasonable size for a spritesheet
-//     }
-
-//     // Calculate total area needed by all images
-//     let mut total_area: u64 = 0;
-//     let mut max_width = 0u32;
-//     let mut max_height = 0u32;
-
-//     for img in images {
-//         let width = img.image.width();
-//         let height = img.image.height();
-//         total_area += (width as u64) * (height as u64);
-//         if width > max_width {
-//             max_width = width;
-//         }
-//         if height > max_height {
-//             max_height = height;
-//         }
-//     }
-
-//     // Start with a sheet size that can fit the largest single image
-//     let mut sheet_size = std::cmp::max(max_width, max_height) as usize;
-
-//     // Ensure minimum size (64x64) to avoid excessively small sheets
-//     sheet_size = sheet_size.max(64);
-
-//     // If we have multiple images, try to size the sheet to accommodate them efficiently
-//     if images.len() > 1 {
-//         // Calculate approximate dimension needed based on total area
-//         // We use 1.3 efficiency factor to account for packing inefficiency
-//         // (slightly higher than before to better accommodate varied sizes)
-//         let needed_width = ((total_area as f64 * 1.3).sqrt()).ceil() as usize;
-//         sheet_size = sheet_size.max(needed_width);
-//     }
-
-//     // For very large numbers of small images, we might want to cap the size
-//     // to prevent unreasonably large sheets, but keep it dynamic within bounds
-//     let max_reasonable_size = 4096;
-//     if sheet_size > max_reasonable_size {
-//         // If we exceed the maximum, we'll use the maximum but this ideally
-//         // should trigger multiple sheets in the packing algorithm
-//         // For now, we'll cap it to prevent memory issues
-//         sheet_size = max_reasonable_size;
-//     }
-
-//     sheet_size
-// }
-
 // Tests
 
 #[cfg(test)]
