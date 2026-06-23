@@ -171,7 +171,7 @@ pub async fn process_raw(
     for p in &pending {
         if dry_run {
             dispatched += 1;
-            progress("Uploading", dispatched, total, &p.name.as_str());
+            progress("Uploading", dispatched, total, p.name.as_str());
             codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), 0));
             continue;
         }
@@ -194,7 +194,7 @@ pub async fn process_raw(
                     String::new()
                 };
                 lockfile.set_uri(input_name, p.hash.clone(), uri.clone());
-                progress("Copying", dispatched, total, &p.name.as_str());
+                progress("Copying", dispatched, total, p.name.as_str());
                 codegen_entries.push(CodegenEntry::asset(
                     p.name.clone(),
                     codegen::AssetRef::Uri(uri),
@@ -216,13 +216,13 @@ pub async fn process_raw(
                     continue;
                 }
                 let fallback_id = lockfile.get(input_name, &p.hash).unwrap_or(0);
-                progress("Copying", dispatched, total, &p.name.as_str());
+                progress("Copying", dispatched, total, p.name.as_str());
                 codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), fallback_id));
             }
             Target::Cloud => {
                 if let Some(cached_id) = lockfile.get(input_name, &p.hash) {
                     dispatched += 1;
-                    progress("Uploading", dispatched, total, &p.name.as_str());
+                    progress("Uploading", dispatched, total, p.name.as_str());
                     codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), cached_id));
                     continue;
                 }

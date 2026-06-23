@@ -15,10 +15,12 @@ use super::super::asset::ImageFormat;
 pub fn svg_to_png(data: &[u8], scale: f32) -> Result<Vec<u8>> {
     let scale = scale.max(0.01);
 
-    let mut opt = usvg::Options::default();
+    let opt = usvg::Options {
+        style_sheet: Some("svg { color: white; }".to_string()),
+        ..Default::default()
+    };
     // Inject a CSS stylesheet to ensure currentColor defaults to white instead of black
     // This affects the root SVG element so that currentColor inherits white
-    opt.style_sheet = Some("svg { color: white; }".to_string());
     let tree = usvg::Tree::from_data(data, &opt).context("Failed to parse SVG")?;
 
     let size = tree.size();

@@ -36,7 +36,6 @@ struct Pending {
 /// Error type for asset processing failures
 #[derive(Debug)]
 struct ProcessingError {
-    name: String,
     error: anyhow::Error,
 }
 
@@ -85,7 +84,6 @@ fn process_single_image_sync(
         alpha_bleed(&mut rgba);
     }
     let bytes = encode_png(&rgba).map_err(|e| ProcessingError {
-        name: img.name.clone(),
         error: anyhow::anyhow!("Failed to encode \"{}\": {}", img.name, e),
     })?;
 
@@ -175,7 +173,7 @@ pub async fn process_individual(
     for p in &pending {
         if dry_run {
             dispatched += 1;
-            progress("Uploading", dispatched, total, &p.name.as_str());
+            progress("Uploading", dispatched, total, p.name.as_str());
             codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), 0));
             continue;
         }
@@ -198,7 +196,7 @@ pub async fn process_individual(
                     String::new()
                 };
                 lockfile.set_uri(input_name, p.hash.clone(), uri.clone());
-                progress("Copying", dispatched, total, &p.name.as_str());
+                progress("Copying", dispatched, total, p.name.as_str());
                 codegen_entries.push(CodegenEntry::asset(
                     p.name.clone(),
                     codegen::AssetRef::Uri(uri),
@@ -216,13 +214,13 @@ pub async fn process_individual(
                     continue;
                 }
                 let fallback = lockfile.get(input_name, &p.hash).unwrap_or(0);
-                progress("Copying", dispatched, total, &p.name.as_str());
+                progress("Copying", dispatched, total, p.name.as_str());
                 codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), fallback));
             }
             Target::Cloud => {
                 if let Some(cached_id) = lockfile.get(input_name, &p.hash) {
                     dispatched += 1;
-                    progress("Uploading", dispatched, total, &p.name.as_str());
+                    progress("Uploading", dispatched, total, p.name.as_str());
                     codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), cached_id));
                     continue;
                 }
@@ -250,10 +248,10 @@ pub async fn process_individual(
                     let id = c_arc
                         .upload(UploadParams {
                             file_name,
-                            display_name: display_name,
-                            description: description,
+                            display_name,
+                            description,
                             data: bytes,
-                            kind: kind,
+                            kind,
                             creator: creator_own,
                         })
                         .await
@@ -269,7 +267,7 @@ pub async fn process_individual(
     for (base_name, variants) in dpi_groups {
         if dry_run {
             dispatched += 1;
-            progress("Uploading", dispatched, total, &base_name.as_str());
+            progress("Uploading", dispatched, total, base_name.as_str());
             let fake: Vec<(u8, u64)> = variants.iter().map(|(s, _)| (*s, 0)).collect();
             codegen_entries.push(CodegenEntry::dpi_group(base_name.to_string(), fake));
             continue;
@@ -299,7 +297,7 @@ pub async fn process_individual(
                 Target::Cloud => {
                     if let Some(cached) = lockfile.get(input_name, &hash) {
                         dispatched += 1;
-                        progress("Uploading", dispatched, total, &base_name.as_str());
+                        progress("Uploading", dispatched, total, base_name.as_str());
                         resolved_variants.push((scale, cached));
                         continue;
                     }
@@ -326,7 +324,7 @@ pub async fn process_individual(
                         Ok(id) => {
                             lockfile.set(input_name, hash, id);
                             dispatched += 1;
-                            progress("Uploading", dispatched, total, &base_name.as_str());
+                            progress("Uploading", dispatched, total, base_name.as_str());
                             resolved_variants.push((scale, id));
                         }
                         Err(e) => {
