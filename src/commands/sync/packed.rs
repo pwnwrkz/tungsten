@@ -48,6 +48,7 @@ pub async fn process_packed(
     target: Target,
     dry_run: bool,
     creator: &Creator,
+    asset_type: &str,
     client: &Option<Arc<RobloxClient>>,
     studio_sync: &Option<Arc<StudioSync>>,
     debug_sync: &Option<Arc<DebugSync>>,
@@ -149,6 +150,7 @@ pub async fn process_packed(
                 target,
                 dry_run,
                 creator,
+                asset_type,
                 client,
                 studio_sync,
                 debug_sync,
@@ -198,6 +200,7 @@ pub async fn upload_or_copy_sheet(
     target: Target,
     dry_run: bool,
     creator: &Creator,
+    asset_type: &str,
     client: &Option<Arc<RobloxClient>>,
     studio_sync: &Option<Arc<StudioSync>>,
     debug_sync: &Option<Arc<DebugSync>>,
@@ -222,6 +225,7 @@ pub async fn upload_or_copy_sheet(
                     description: sheet_description.to_string(),
                     data: png_bytes.to_vec(),
                     kind: AssetKind::Image(ImageFormat::Png),
+                    asset_type_override: Some(asset_type.to_string()),
                     creator: creator.clone(),
                 })
                 .await

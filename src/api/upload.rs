@@ -33,6 +33,9 @@ pub struct UploadParams {
     pub kind: AssetKind,
     /// Creator to upload under.
     pub creator: Creator,
+    /// Optional override for the asset type string sent to the API.
+    /// If set, this overrides the value derived from `kind`.
+    pub asset_type_override: Option<String>,
 }
 
 impl RobloxClient {
@@ -53,7 +56,7 @@ impl RobloxClient {
     /// Upload an asset and return its Roblox asset ID.
     pub async fn upload(&self, params: UploadParams) -> Result<u64> {
         let request_json = serde_json::to_string(&UploadRequest {
-            asset_type: params.kind.api_type().to_string(),
+            asset_type: params.asset_type_override.clone().unwrap_or_else(|| params.kind.api_type().to_string()),
             display_name: params.display_name.clone(),
             description: params.description.clone(),
             creation_context: CreationContext {

@@ -96,6 +96,7 @@ impl CompressOptions {
 /// output_path = "src/icons.luau"
 /// packable = true
 /// svg_scale = 2.0
+/// type = "decal"
 ///
 /// [inputs.icons.compress_options]
 /// jpeg_quality = 75
@@ -107,6 +108,9 @@ pub struct InputConfig {
     pub path: String,
     /// Path to the generated Luau/TypeScript file.
     pub output_path: String,
+    /// The Roblox asset type (e.g., "decal", "audio", "model"). Overrides the type inferred from file kind.
+    #[serde(rename = "type")]
+    pub asset_type: String,
     /// Pack images into spritesheets. Only applies to image inputs.
     pub packable: Option<bool>,
     /// Scale factor applied when rasterizing SVG files (default: 1.0).
@@ -194,6 +198,7 @@ mod tests {
             [inputs.assets]
             path = "assets/**/*.png"
             output_path = "src/assets.luau"
+            type = "image"
         "#,
         );
         assert_eq!(cfg.creator.id, 12345);
@@ -211,6 +216,7 @@ mod tests {
             [inputs.icons]
             path = "assets/**/*.svg"
             output_path = "src/icons.luau"
+            type = "decal"
         "#,
         );
         let input = cfg.inputs.get("icons").unwrap();
@@ -229,6 +235,7 @@ mod tests {
             path = "assets/**/*.svg"
             output_path = "src/icons.luau"
             svg_scale = 2.0
+            type = "decal"
         "#,
         );
         let input = cfg.inputs.get("icons").unwrap();
@@ -251,6 +258,7 @@ mod tests {
             [inputs.assets]
             path = "assets/**/*.png"
             output_path = "src/assets.luau"
+            type = "image"
         "#,
         );
         let ts_def = cfg
@@ -275,6 +283,7 @@ mod tests {
             [inputs.assets]
             path = "assets/**/*.png"
             output_path = "src/assets.luau"
+            type = "image"
         "#,
         );
         let ts_def = cfg.codegen.as_ref().and_then(|c| c.ts_declaration);
@@ -292,6 +301,7 @@ mod tests {
             [inputs.icons]
             path = "assets/**/*"
             output_path = "src/icons.luau"
+            type = "image"
         "#,
         );
         let input = cfg.inputs.get("icons").unwrap();
@@ -309,6 +319,7 @@ mod tests {
             [inputs.icons]
             path = "assets/**/*"
             output_path = "src/icons.luau"
+            type = "image"
 
             [inputs.icons.compress_options]
             jpeg_quality  = 70
@@ -339,6 +350,7 @@ mod tests {
             [inputs.icons]
             path = "assets/**/*"
             output_path = "src/icons.luau"
+            type = "image"
 
             [inputs.icons.compress_options]
             jpeg_quality = 60
@@ -363,6 +375,7 @@ mod tests {
             [inputs.icons]
             path = "assets/**/*"
             output_path = "src/icons.luau"
+            type = "image"
 
             [inputs.icons.compress_options]
         "#,

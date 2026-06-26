@@ -31,6 +31,7 @@ struct Pending {
     kind: AssetKind,
     display_name: String,
     description: String,
+    asset_type: Option<String>,
 }
 
 /// Error type for asset processing failures
@@ -62,6 +63,7 @@ fn process_single_image_sync(
     compress_options: Option<&CompressOptions>,
     bleed: bool,
     _creator: &Creator,
+    asset_type: &str,
 ) -> Result<Pending, ProcessingError> {
     // Find the actual file path for this image
     let path = paths
@@ -102,6 +104,7 @@ fn process_single_image_sync(
         kind,
         display_name,
         description,
+        asset_type: Some(asset_type.to_string()),
     })
 }
 
@@ -121,6 +124,7 @@ pub async fn process_individual(
     target: Target,
     dry_run: bool,
     creator: &Creator,
+    asset_type: &str,
     client: &Option<Arc<RobloxClient>>,
     studio_sync: &Option<Arc<StudioSync>>,
     debug_sync: &Option<Arc<DebugSync>>,
@@ -144,6 +148,7 @@ pub async fn process_individual(
                 compress_options,
                 bleed,
                 creator,
+                asset_type,
             )
         })
         .collect::<Vec<_>>();
@@ -229,7 +234,6 @@ pub async fn process_individual(
                     continue;
                 };
                 let c_arc = Arc::clone(c);
-                let creator_own = creator.clone();
                 let file_name = p
                     .path
                     .file_name()
@@ -238,20 +242,25 @@ pub async fn process_individual(
                     .into_owned();
                 let name_clone = p.name.clone();
                 let hash_clone = p.hash.clone();
+                let display_name_clone = p.display_name.clone();
+                let description_clone = p.description.clone();
+                let bytes_clone = p.bytes.clone();
+                let kind_clone = p.kind;
+                let asset_type_clone = p.asset_type.clone();
                 let semaphore_clone = semaphore.clone();
-                let display_name = p.display_name.clone();
-                let description = p.description.clone();
-                let bytes = p.bytes.clone();
-                let kind = p.kind;
+                let creator_own = creator.clone();
                 upload_tasks.spawn(async move {
                     let _permit = semaphore_clone.acquire_owned().await;
                     let id = c_arc
                         .upload(UploadParams {
-                            file_name,
-                            display_name,
-                            description,
-                            data: bytes,
-                            kind,
+                            file_name: file_name.clone(),
+                            display_name: display_name_clone.clone(),
+                            description: description_clone.clone(),
+                            data: bytes_clone.clone(),
+                            kind: kind_clone,
+                            asset_type_override: asset_type_clone
+                                .clone()
+                                .or_else(|| Some(kind_clone.api_type().to_string())),
                             creator: creator_own,
                         })
                         .await
@@ -317,6 +326,7 @@ pub async fn process_individual(
                             description: "Uploaded by Tungsten".to_string(),
                             data: bytes,
                             kind: AssetKind::Image(ImageFormat::Png),
+                            asset_type_override: Some(asset_type.to_string()),
                             creator: creator.clone(),
                         })
                         .await

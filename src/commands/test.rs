@@ -123,6 +123,7 @@ pub async fn run(config: Config, api_key: Option<String>) -> Result<()> {
                 data: test_bytes,
                 kind: AssetKind::Image(ImageFormat::Png),
                 creator,
+                asset_type_override: None,
             })
             .await
         {

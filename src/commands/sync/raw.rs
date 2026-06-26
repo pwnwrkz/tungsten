@@ -133,6 +133,7 @@ pub async fn process_raw(
     target: Target,
     dry_run: bool,
     creator: &Creator,
+    asset_type: &str,
     client: &Option<Arc<RobloxClient>>,
     studio_sync: &Option<Arc<StudioSync>>,
     debug_sync: &Option<Arc<DebugSync>>,
@@ -239,27 +240,29 @@ pub async fn process_raw(
                 let p_description = p.description.clone();
                 let p_bytes = p.bytes.clone();
                 let p_kind = p.kind;
+                let asset_type_clone = asset_type.to_string();
                 let semaphore_clone = semaphore.clone();
                 upload_tasks.spawn(async move {
-                    let _permit = semaphore_clone.acquire_owned().await;
-                    let file_name = p_path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned();
-                    let id = c_arc
-                        .upload(UploadParams {
-                            file_name,
-                            display_name: p_display_name,
-                            description: p_description,
-                            data: p_bytes,
-                            kind: p_kind,
-                            creator: creator_own,
-                        })
-                        .await
-                        .with_context(|| format!("Failed to upload \"{}\"", &p_name))?;
-                    Ok((p_name, id, p_hash))
-                });
+                        let _permit = semaphore_clone.acquire_owned().await;
+                        let file_name = p_path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .into_owned();
+                        let id = c_arc
+                            .upload(UploadParams {
+                                file_name,
+                                display_name: p_display_name.clone(),
+                                description: p_description.clone(),
+                                data: p_bytes.clone(),
+                                kind: p_kind,
+                                asset_type_override: Some(asset_type_clone.clone()),
+                                creator: creator_own,
+                            })
+                            .await
+                            .with_context(|| format!("Failed to upload \"{}\"", p_name.clone()))?;
+                        Ok((p_name.clone(), id, p_hash.clone()))
+                    });
             }
         }
     }
