@@ -5,13 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v3.0.0] - 2026-06-05
+## [v3.0.0-rc.1] - 2026-06-05
 
 ### Added
+
 - CHANGELOG.md file to track changes between versions
 - Added asset_type override to uploads, allowing specifying asset type (e.g., decal, image) independent of file kind.
 
 ### Changed
+
 - Improved variable naming in `src/core/assets/img/alpha_bleed.rs` for better readability:
   - Replaced single-letter variables (`w`, `h`, `len`, `i`, `x`, `y`) with descriptive names (`width`, `height`, `pixel_count`, `index`, `x`, `y`)
   - Improved clarity in BFS algorithm with more descriptive variable names (`red_sum`, `green_sum`, `blue_sum`, `sample_count`)
@@ -43,4 +45,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - No fixes in this release
 
 ### Removed
+
 - Removed DPI variant packing support; high DPI variants are skipped for packing (waitlisted for manual upload) but still generate DPI group code entries
