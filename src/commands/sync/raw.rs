@@ -243,26 +243,26 @@ pub async fn process_raw(
                 let asset_type_clone = asset_type.to_string();
                 let semaphore_clone = semaphore.clone();
                 upload_tasks.spawn(async move {
-                        let _permit = semaphore_clone.acquire_owned().await;
-                        let file_name = p_path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .into_owned();
-                        let id = c_arc
-                            .upload(UploadParams {
-                                file_name,
-                                display_name: p_display_name.clone(),
-                                description: p_description.clone(),
-                                data: p_bytes.clone(),
-                                kind: p_kind,
-                                asset_type_override: Some(asset_type_clone.clone()),
-                                creator: creator_own,
-                            })
-                            .await
-                            .with_context(|| format!("Failed to upload \"{}\"", p_name.clone()))?;
-                        Ok((p_name.clone(), id, p_hash.clone()))
-                    });
+                    let _permit = semaphore_clone.acquire_owned().await;
+                    let file_name = p_path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
+                    let id = c_arc
+                        .upload(UploadParams {
+                            file_name,
+                            display_name: p_display_name.clone(),
+                            description: p_description.clone(),
+                            data: p_bytes.clone(),
+                            kind: p_kind,
+                            asset_type_override: Some(asset_type_clone.clone()),
+                            creator: creator_own,
+                        })
+                        .await
+                        .with_context(|| format!("Failed to upload \"{}\"", p_name.clone()))?;
+                    Ok((p_name.clone(), id, p_hash.clone()))
+                });
             }
         }
     }
