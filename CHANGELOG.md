@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - CHANGELOG.md file to track changes between versions
-- Added asset_type override to uploads, allowing specifying asset type (e.g., decal, image) independent of file kind.
+- **Breaking:** Added required `type` field to inputs, allowing specifying asset type (e.g., decal, image) independent of file kind.
 
 ### Changed
 
