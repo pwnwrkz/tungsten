@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::path::{Path};
+use toml;
 
 use crate::core::assets::img::compress::CompressOptions as ResolvedCompressOptions;
 
@@ -129,6 +131,84 @@ impl InputConfig {
         self.svg_scale.unwrap_or(1.0).max(MIN_SVG_SCALE)
     }
 
+    /// Returns the effective SVG scale for a given file, checking
+    /// `.tmeta` files in the file's directory and parent directories up to
+    /// the input directory, falling back to the configured value.
+    pub fn effective_svg_scale(&self, file_path: &Path, base_path: &str) -> f32 {
+        let base = Path::new(base_path);
+        // Walk from the file's directory up to and including the base directory.
+        for anc in file_path.ancestors() {
+            // Stop if we have gone above the base directory.
+            if !anc.starts_with(base) {
+                break;
+            }
+            if let Some(scale) = Self::svg_scale_from_tmeta(anc) {
+                return scale.max(MIN_SVG_SCALE);
+            }
+            // Stop after checking the base directory itself.
+            if anc == base {
+                break;
+            }
+        }
+        // Fallback to the config‑provided scale (or default 1.0).
+        self.resolved_svg_scale()
+    }
+
+    /// Attempts to read an `svg_scale` field from a `.tmeta` file associated
+    /// with `item` (which may be a file or directory). Returns `None` if the
+    /// file does not exist, cannot be parsed, or does not contain the field.
+    fn svg_scale_from_tmeta(item: &Path) -> Option<f32> {
+        // Determine candidate .tmeta paths following the same precedence as
+        // `AssetMeta::load_for`.
+        if item.is_file() {
+            // Try <file>.<ext>.tmeta first.
+            if let Some(ext) = item.extension() {
+                let mut path = item.to_path_buf();
+                path.set_extension(format!("{}.tmeta", ext.to_string_lossy()));
+                if let Some(scale) = Self::try_read_tmeta(&path) {
+                    return Some(scale);
+                }
+            }
+            // Fall back to <file>.tmeta.
+            let mut path = item.to_path_buf();
+            path.set_extension("tmeta");
+            if let Some(scale) = Self::try_read_tmeta(&path) {
+                return Some(scale);
+            }
+        } else {
+            // Directory: <dir>.tmeta (i.e., parent directory contains <dir_name>.tmeta)
+            let dir_name = match item.file_name() {
+                Some(n) => n.to_os_string(),
+                None => return None,
+            };
+            let mut parent = match item.parent() {
+                Some(p) => p.to_path_buf(),
+                None => return None,
+            };
+            parent.push(dir_name);
+            parent.set_extension("tmeta");
+            if let Some(scale) = Self::try_read_tmeta(&parent) {
+                return Some(scale);
+            }
+        }
+        None
+    }
+
+    /// Reads a `.tmeta` file and extracts the `svg_scale` field if present.
+    fn try_read_tmeta(path: &Path) -> Option<f32> {
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|contents| {
+                // Parse the TOML and look for a numeric `svg_scale` value.
+                let map: toml::Value = toml::from_str(&contents).ok()?;
+                match map.get("svg_scale") {
+                    Some(toml::Value::Float(v)) => Some(*v as f32),
+                    Some(toml::Value::Integer(v)) => Some(*v as f32),
+                    _ => None,
+                }
+            })
+    }
+
     /// Returns resolved `compress::CompressOptions` if compression is enabled
     /// for this input, or `None` if the `compress_options` section was omitted.
     pub fn resolved_compress_options(&self) -> Option<ResolvedCompressOptions> {
@@ -162,6 +242,9 @@ pub fn load(path: &str) -> Result<Config> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::File;
+    use std::io::Write;
+    use tempfile::TempDir;
 
     fn parse(s: &str) -> Config {
         toml::from_str(s).unwrap()
@@ -385,5 +468,262 @@ mod tests {
             input.compress_options.is_some(),
             "empty compress_options section should still enable compression"
         );
+    }
+
+    #[test]
+    fn test_effective_svg_scale_file_override() {
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path().join("input");
+        std::fs::create_dir_all(&base).unwrap();
+
+        // Create a fake file inside input
+        let file = base.join("test.svg");
+        File::create(&file).unwrap();
+
+        // Parent directory .tmeta with scale 1.5 -> creates base.tmeta inside parent of base
+        let parent_tmeta = base.parent().unwrap().join("input.tmeta");
+        let mut f = File::create(&parent_tmeta).unwrap();
+        writeln!(f, "svg_scale = 1.5").unwrap();
+
+        // File-specific .tmeta (test.svg.tmeta) with scale 2.5
+        let file_tmeta = file.with_extension("svg.tmeta");
+        let mut f2 = File::create(&file_tmeta).unwrap();
+        writeln!(f2, "svg_scale = 2.5").unwrap();
+
+        let config_str = format!(
+            r#"
+            [creator]
+            type = "user"
+            id = 1
+
+            [inputs.test]
+            path = "{}"
+            output_path = "src/out.luau"
+            type = "decal"
+            "#,
+            base.to_string_lossy().replace('\\', "/")
+        );
+        let cfg: Config = toml::from_str(&config_str).unwrap();
+        let input = cfg.inputs.get("test").unwrap();
+        let scale = input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
+        // Should pick file's own .tmeta (2.5)
+        assert_eq!(scale, 2.5);
+    }
+
+    #[test]
+    fn test_effective_svg_scale_single_parent() {
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path().join("input");
+        std::fs::create_dir_all(&base).unwrap();
+        let sub = base.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        let file = sub.join("test.svg");
+        File::create(&file).unwrap();
+
+        // Parent directory (sub) .tmeta with scale 3.0 -> creates sub.tmeta inside base
+        let parent_tmeta = base.join("sub.tmeta");
+        let mut f = File::create(&parent_tmeta).unwrap();
+        writeln!(f, "svg_scale = 3.0").unwrap();
+        // No .tmeta on file
+
+        let config_str = format!(
+            r#"
+            [creator]
+            type = "user"
+            id = 1
+
+            [inputs.test]
+            path = "{}"
+            output_path = "src/out.luau"
+            type = "decal"
+            "#,
+            base.to_string_lossy().replace('\\', "/")
+        );
+        let cfg: Config = toml::from_str(&config_str).unwrap();
+        let input = cfg.inputs.get("test").unwrap();
+        let scale = input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
+        // Should pick parent's .tmeta (3.0)
+        assert_eq!(scale, 3.0);
+    }
+
+    #[test]
+    fn test_effective_svg_scale_multiple_nested() {
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path().join("input");
+        std::fs::create_dir_all(&base).unwrap();
+        let l1 = base.join("l1");
+        std::fs::create_dir_all(&l1).unwrap();
+        let l2 = l1.join("l2");
+        std::fs::create_dir_all(&l2).unwrap();
+
+        let file = l2.join("test.svg");
+        File::create(&file).unwrap();
+
+        // grandparent (l1) .tmeta with scale 4.0 -> creates l1.tmeta inside base
+        let l1_tmeta = base.join("l1.tmeta");
+        let mut f = File::create(&l1_tmeta).unwrap();
+        writeln!(f, "svg_scale = 4.0").unwrap();
+        // No .tmedia in l2 or file
+
+        let config_str = format!(
+            r#"
+            [creator]
+            type = "user"
+            id = 1
+
+            [inputs.test]
+            path = "{}"
+            output_path = "src/out.luau"
+            type = "decal"
+            "#,
+            base.to_string_lossy().replace('\\', "/")
+        );
+        let cfg: Config = toml::from_str(&config_str).unwrap();
+        let input = cfg.inputs.get("test").unwrap();
+        let scale = input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
+        // Should pick l1's .tmeta (4.0)
+        assert_eq!(scale, 4.0);
+    }
+
+    #[test]
+    fn test_effective_svg_scale_input_dir() {
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path().join("input");
+        std::fs::create_dir_all(&base).unwrap();
+        let sub = base.join("deep");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        let file = sub.join("test.svg");
+        File::create(&file).unwrap();
+
+        // Input directory (base) .tmeta with scale 5.0 -> creates base.tmeta inside parent of base
+        let parent_tmeta = base.parent().unwrap().join("input.tmeta");
+        let mut f = File::create(&parent_tmeta).unwrap();
+        writeln!(f, "svg_scale = 5.0").unwrap();
+        // No other .tmeta
+
+        let config_str = format!(
+            r#"
+            [creator]
+            type = "user"
+            id = 1
+
+            [inputs.test]
+            path = "{}"
+            output_path = "src/out.luau"
+            type = "decal"
+            "#,
+            base.to_string_lossy().replace('\\', "/")
+        );
+        let cfg: Config = toml::from_str(&config_str).unwrap();
+        let input = cfg.inputs.get("test").unwrap();
+        let scale = input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
+        // Should pick input dir's .tmeta (5.0)
+        assert_eq!(scale, 5.0);
+    }
+
+    #[test]
+    fn test_effective_svg_scale_fallback_to_config() {
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path().join("input");
+        std::fs::create_dir_all(&base).unwrap();
+        let sub = base.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        let file = sub.join("test.svg");
+        File::create(&file).unwrap();
+        // No .tmeta anywhere
+
+        let config_str = format!(
+            r#"
+            [creator]
+            type = "user"
+            id = 1
+
+            [inputs.test]
+            path = "{}"
+            output_path = "src/out.luau"
+            svg_scale = 6.0
+            type = "decal"
+            "#,
+            base.to_string_lossy().replace('\\', "/")
+        );
+        let cfg: Config = toml::from_str(&config_str).unwrap();
+        let input = cfg.inputs.get("test").unwrap();
+        let scale = input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
+        // Should fall back to config svg_scale (6.0)
+        assert_eq!(scale, 6.0);
+    }
+
+    #[test]
+    fn test_effective_svg_scale_fallback_to_default_when_no_config() {
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path().join("input");
+        std::fs::create_dir_all(&base).unwrap();
+        let file = base.join("test.svg");
+        File::create(&file).unwrap();
+        // No .tmeta anywhere
+
+        let config_str = format!(
+            r#"
+            [creator]
+            type = "user"
+            id = 1
+
+            [inputs.test]
+            path = "{}"
+            output_path = "src/out.luau"
+            type = "decal"
+            "#,
+            base.to_string_lossy().replace('\\', "/")
+        );
+        let cfg: Config = toml::from_str(&config_str).unwrap();
+        let input = cfg.inputs.get("test").unwrap();
+        let scale = input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
+        // Should fall back to default 1.0
+        assert_eq!(scale, 1.0);
+    }
+
+    #[test]
+    fn test_effective_svg_scale_does_not_escape_input_root() {
+        let tmp = TempDir::new().unwrap();
+        // Create an external directory outside the input root
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        // Place a .tmeta with a huge value outside
+        let outside_tmeta = outside.join("outside.tmeta");
+        let mut f = File::create(&outside_tmeta).unwrap();
+        writeln!(f, "svg_scale = 999.0").unwrap();
+
+        // Input root
+        let base = tmp.path().join("input");
+        std::fs::create_dir_all(&base).unwrap();
+        let sub = base.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        let file = sub.join("test.svg");
+        File::create(&file).unwrap();
+        // No .tmeta inside input tree
+
+        let config_str = format!(
+            r#"
+            [creator]
+            type = "user"
+            id = 1
+
+            [inputs.test]
+            path = "{}"
+            output_path = "src/out.luau"
+            svg_scale = 7.0
+            type = "decal"
+            "#,
+            base.to_string_lossy().replace('\\', "/")
+        );
+        let cfg: Config = toml::from_str(&config_str).unwrap();
+        let input = cfg.inputs.get("test").unwrap();
+        let scale = input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
+        // Should NOT pick the outside .tmeta (999.0); should fall back to config (7.0)
+        assert_eq!(scale, 7.0);
     }
 }
