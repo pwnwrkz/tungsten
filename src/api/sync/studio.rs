@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use reqwest;
 use roblox_install::RobloxStudio;
 use std::path::{Path, PathBuf};
 
@@ -15,12 +16,46 @@ pub struct StudioSync {
 }
 
 impl StudioSync {
-    /// Locate the Roblox Studio installation and set up the sync folder.
-    /// Wipes any previous contents so stale assets don't linger.
-    pub fn new() -> Result<Self> {
-        let studio =
-            RobloxStudio::locate().context("Could not locate Roblox Studio installation")?;
-        let content_path = studio.content_path();
+    /// Set up the sync folder.
+    /// If `studio_path_override` is Some, it is used as the base Roblox Studio path;
+    /// otherwise the installation is located via `roblox_install`.
+    /// If `auto_route_version` is true, the latest version is fetched from
+    /// https://setup.roblox.com/versionQTStudio and appended to the path.
+    /// Does not wipe previous contents to allow incremental sync and preserve
+    /// assets between Studio version updates.
+    pub fn new(studio_path_override: Option<String>, auto_route_version: bool) -> Result<Self> {
+        let base_path = if let Some(path) = studio_path_override {
+            PathBuf::from(path)
+        } else {
+            let studio =
+                RobloxStudio::locate().context("Could not locate Roblox Studio installation")?;
+            studio.content_path().to_path_buf()
+        };
+
+        let content_path = if auto_route_version {
+            let mut path = base_path;
+            // Fetch the latest version from Roblox
+            let version = reqwest::blocking::get("https://setup.roblox.com/versionQTStudio")
+                .context("Failed to fetch latest Roblox Studio version")?
+                .text()
+                .context("Failed to read version response")?
+                .trim()
+                .to_string();
+
+            // Append "Versions/<version>" to the base path.
+            // Try capital "Versions" (Windows) first, then lowercase "versions" (Linux/Wine).
+            path.push("Versions");
+            path.push(&version);
+            if !path.exists() {
+                path.pop();
+                path.pop();
+                path.push("versions");
+                path.push(&version);
+            }
+            path
+        } else {
+            base_path
+        };
 
         let cwd = std::env::current_dir().context("Could not get current directory")?;
         let project_name = cwd
@@ -34,15 +69,6 @@ impl StudioSync {
 
         let identifier = format!(".tungsten_{}", project_name);
         let sync_path = content_path.join(&identifier);
-
-        if sync_path.exists() {
-            std::fs::remove_dir_all(&sync_path).with_context(|| {
-                format!(
-                    "Failed to clear previous Studio sync folder \"{}\"",
-                    sync_path.display()
-                )
-            })?;
-        }
 
         std::fs::create_dir_all(&sync_path).with_context(|| {
             format!(

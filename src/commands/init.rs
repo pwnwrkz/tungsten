@@ -2,8 +2,6 @@ use crate::log;
 use anyhow::{Result, bail};
 use std::path::Path;
 
-const GITIGNORE_ENTRY: &str = "# Tungsten API key\ntungsten_api_key.env\n";
-
 #[allow(dead_code)]
 const ASSET_EXTENSIONS: &[&str] = &[
     "png", "jpg", "jpeg", "bmp", "tga", "svg", "mp3", "ogg", "flac", "wav", "fbx", "gltf", "glb",
@@ -47,7 +45,7 @@ const KNOWN_ASSET_DIRS: &[&str] = &[
 pub fn run() -> Result<()> {
     if Path::new("tungsten.toml").exists() {
         bail!(
-            "tungsten.toml already exists in this directory\n  \
+            "tungsten.toml already exists in this directory\n\
              Hint: Delete it first if you want to reinitialize"
         );
     }
@@ -81,20 +79,6 @@ pub fn run() -> Result<()> {
         info,
         "See https://pwnwrkz.github.io/tungsten-docs/reference/configuration/ for configuration help"
     );
-
-    // .gitignore update
-    let gitignore = Path::new(".gitignore");
-    let existing = std::fs::read_to_string(gitignore).unwrap_or_default();
-    if !existing.contains("tungsten_api_key.env") {
-        let content = if existing.is_empty() {
-            GITIGNORE_ENTRY.to_string()
-        } else {
-            format!("{}\n{}", existing.trim_end(), GITIGNORE_ENTRY)
-        };
-        std::fs::write(gitignore, content)
-            .map_err(|e| anyhow::anyhow!("Failed to update .gitignore: {}", e))?;
-        log!(success, "Added tungsten_api_key.env to .gitignore");
-    }
 
     Ok(())
 }

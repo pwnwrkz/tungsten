@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.0.0-rc.2]
+
+### Added
+
+- Added studio sync cleanup logic to remove stale files from `.tungsten-debug/` folder
+- Added file tracking mechanism for Studio sync to track expected files during sync operations
+- Added `StudioConfig` section with `studio_path` and `auto_route_version` for advanced Studio path handling
+- Added automatic version routing via `https://setup.roblox.com/versionQTStudio` when `auto_route_version` is enabled
+
+### Changed
+
+- Changed Studio sync behavior from wiping previous contents to incremental sync that preserves assets between Studio version updates
+- Updated SVG scaling to use per-file scale based on viewBox rather than global input scale
+
+### Fixed
+
+- Fixed studio sync incorrectly changing file extensions for audio and model assets (e.g., .mp3 to .audio, .rbxm to .model) when syncing to Studio target
+
+### Removed
+
 ## [v3.0.0-rc.1] - 2026-06-27
 
 ### Added
@@ -21,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated ignore reason in `src/core/assets/img/convert.rs` test:
   - Added descriptive reason to ignored test: `#[ignore = "TGA support not fully tested in CI environment"]`
 - Improved documentation accuracy:
-  - Fixed creator configuration example in docs/getting-started/first-sync.mdx to show correct [creator] format
+  - Fixed creator configuration example in docs/getting-started/first-sync.mdx to show correct `[creator]` format
   - Corrected debug folder naming in docs/reference/cli.md from .tungsten_debug to .tungsten-debug to match implementation
   - Enhanced meta file documentation in docs/reference/meta-files.mdx to explain the naming convention priority:
     - For files: tries `name.format.tmeta` first (e.g., `logo.png.tmeta`), then falls back to `name.tmeta` (e.g., `logo.tmeta`)

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -53,6 +54,7 @@ pub async fn process_packed(
     studio_sync: &Option<Arc<StudioSync>>,
     debug_sync: &Option<Arc<DebugSync>>,
     lockfile: &mut Lockfile,
+    studio_expected_files: &mut Option<&mut HashSet<String>>,
 ) -> u32 {
     let mut errors: u32 = 0;
 
@@ -155,6 +157,7 @@ pub async fn process_packed(
                 studio_sync,
                 debug_sync,
                 lockfile,
+                studio_expected_files,
             )
             .await;
 
@@ -205,6 +208,7 @@ pub async fn upload_or_copy_sheet(
     studio_sync: &Option<Arc<StudioSync>>,
     debug_sync: &Option<Arc<DebugSync>>,
     lockfile: &mut Lockfile,
+    studio_expected_files: &mut Option<&mut HashSet<String>>,
 ) -> Result<codegen::AssetRef> {
     if dry_run {
         return Ok(codegen::AssetRef::Id(0));
@@ -236,8 +240,19 @@ pub async fn upload_or_copy_sheet(
         Target::Studio => {
             let rel = format!("{}.png", sheet_name);
             let uri = if let Some(ss) = studio_sync {
-                ss.copy_asset(&rel, png_bytes)
-                    .with_context(|| format!("Studio copy failed for \"{}\"", sheet_name))?
+                match ss.copy_asset(&rel, png_bytes) {
+                    Ok(u) => {
+                        // Track expected file for Studio sync cleanup
+                        if let Some(ref mut set) = *studio_expected_files {
+                            set.insert(rel.clone());
+                        }
+                        u
+                    }
+                    Err(e) => {
+                        return Err(e)
+                            .with_context(|| format!("Studio copy failed for \"{}\"", sheet_name));
+                    }
+                }
             } else {
                 String::new()
             };

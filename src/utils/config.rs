@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::path::{Path};
+use std::path::Path;
 use toml;
 
 use crate::core::assets::img::compress::CompressOptions as ResolvedCompressOptions;
@@ -13,6 +13,9 @@ pub struct Config {
     pub creator: CreatorConfig,
     pub codegen: Option<CodegenConfig>,
     pub inputs: HashMap<String, InputConfig>,
+    /// Studio configuration (optional).
+    #[serde(default)]
+    pub studio: Option<StudioConfig>,
 }
 
 fn default_creator_type() -> String {
@@ -87,6 +90,20 @@ impl CompressOptions {
             keep_metadata: self.keep_metadata.unwrap_or(false),
         }
     }
+}
+
+/// Studio-specific configuration.
+#[derive(Deserialize, Default)]
+pub struct StudioConfig {
+    /// Base path to Roblox installation (where Versions folder lives).
+    /// If set, overrides auto-detection.
+    #[serde(default)]
+    pub studio_path: Option<String>,
+    /// If true, automatically fetch latest Studio version from
+    /// https://setup.roblox.com/versionQTStudio and append Versions/<version> to studio_path.
+    /// Only applies if studio_path is set.
+    #[serde(default)]
+    pub auto_route_version: bool,
 }
 
 /// Per-input configuration block.
@@ -196,17 +213,15 @@ impl InputConfig {
 
     /// Reads a `.tmeta` file and extracts the `svg_scale` field if present.
     fn try_read_tmeta(path: &Path) -> Option<f32> {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|contents| {
-                // Parse the TOML and look for a numeric `svg_scale` value.
-                let map: toml::Value = toml::from_str(&contents).ok()?;
-                match map.get("svg_scale") {
-                    Some(toml::Value::Float(v)) => Some(*v as f32),
-                    Some(toml::Value::Integer(v)) => Some(*v as f32),
-                    _ => None,
-                }
-            })
+        std::fs::read_to_string(path).ok().and_then(|contents| {
+            // Parse the TOML and look for a numeric `svg_scale` value.
+            let map: toml::Value = toml::from_str(&contents).ok()?;
+            match map.get("svg_scale") {
+                Some(toml::Value::Float(v)) => Some(*v as f32),
+                Some(toml::Value::Integer(v)) => Some(*v as f32),
+                _ => None,
+            }
+        })
     }
 
     /// Returns resolved `compress::CompressOptions` if compression is enabled
@@ -505,7 +520,8 @@ mod tests {
         );
         let cfg: Config = toml::from_str(&config_str).unwrap();
         let input = cfg.inputs.get("test").unwrap();
-        let scale = input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
+        let scale =
+            input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
         // Should pick file's own .tmeta (2.5)
         assert_eq!(scale, 2.5);
     }
@@ -542,7 +558,8 @@ mod tests {
         );
         let cfg: Config = toml::from_str(&config_str).unwrap();
         let input = cfg.inputs.get("test").unwrap();
-        let scale = input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
+        let scale =
+            input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
         // Should pick parent's .tmeta (3.0)
         assert_eq!(scale, 3.0);
     }
@@ -581,7 +598,8 @@ mod tests {
         );
         let cfg: Config = toml::from_str(&config_str).unwrap();
         let input = cfg.inputs.get("test").unwrap();
-        let scale = input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
+        let scale =
+            input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
         // Should pick l1's .tmeta (4.0)
         assert_eq!(scale, 4.0);
     }
@@ -618,7 +636,8 @@ mod tests {
         );
         let cfg: Config = toml::from_str(&config_str).unwrap();
         let input = cfg.inputs.get("test").unwrap();
-        let scale = input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
+        let scale =
+            input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
         // Should pick input dir's .tmeta (5.0)
         assert_eq!(scale, 5.0);
     }
@@ -651,7 +670,8 @@ mod tests {
         );
         let cfg: Config = toml::from_str(&config_str).unwrap();
         let input = cfg.inputs.get("test").unwrap();
-        let scale = input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
+        let scale =
+            input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
         // Should fall back to config svg_scale (6.0)
         assert_eq!(scale, 6.0);
     }
@@ -680,7 +700,8 @@ mod tests {
         );
         let cfg: Config = toml::from_str(&config_str).unwrap();
         let input = cfg.inputs.get("test").unwrap();
-        let scale = input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
+        let scale =
+            input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
         // Should fall back to default 1.0
         assert_eq!(scale, 1.0);
     }
@@ -722,7 +743,8 @@ mod tests {
         );
         let cfg: Config = toml::from_str(&config_str).unwrap();
         let input = cfg.inputs.get("test").unwrap();
-        let scale = input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
+        let scale =
+            input.effective_svg_scale(&file, base.to_str().unwrap().replace('\\', "/").as_str());
         // Should NOT pick the outside .tmeta (999.0); should fall back to config (7.0)
         assert_eq!(scale, 7.0);
     }

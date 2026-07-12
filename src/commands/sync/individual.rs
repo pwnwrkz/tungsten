@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -129,6 +130,7 @@ pub async fn process_individual(
     studio_sync: &Option<Arc<StudioSync>>,
     debug_sync: &Option<Arc<DebugSync>>,
     lockfile: &mut Lockfile,
+    studio_expected_files: &mut Option<&mut HashSet<String>>,
 ) -> u32 {
     let mut errors: u32 = 0;
     let total = images.len();
@@ -189,7 +191,13 @@ pub async fn process_individual(
                 let rel = format!("{}.png", p.name);
                 let uri = if let Some(ss) = studio_sync {
                     match ss.copy_asset(&rel, &p.bytes) {
-                        Ok(u) => u,
+                        Ok(u) => {
+                            // Track expected file for Studio sync cleanup
+                            if let Some(ref mut set) = *studio_expected_files {
+                                set.insert(rel.clone());
+                            }
+                            u
+                        }
                         Err(e) => {
                             clear_progress_line();
                             log!(warn, "Studio copy failed for \"{}\": {}", p.name, e);
@@ -354,7 +362,13 @@ pub async fn process_individual(
                     let rel = format!("{}@{}x.png", base_name, scale);
                     let uri = if let Some(ss) = studio_sync {
                         match ss.copy_asset(&rel, &bytes) {
-                            Ok(u) => u,
+                            Ok(u) => {
+                                // Track expected file for Studio sync cleanup
+                                if let Some(ref mut set) = *studio_expected_files {
+                                    set.insert(rel.clone());
+                                }
+                                u
+                            }
                             Err(e) => {
                                 clear_progress_line();
                                 log!(warn, "Studio copy failed: {}", e);

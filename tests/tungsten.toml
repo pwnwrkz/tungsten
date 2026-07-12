@@ -1,0 +1,13 @@
+[creator]
+type = "user"
+id = 0
+
+[codegen]
+style = "flat"
+strip_extension = true
+
+[inputs.assets]
+path = "assets/*"
+output_path = "src/assets.luau"
+packable = true
+

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -138,6 +139,7 @@ pub async fn process_raw(
     studio_sync: &Option<Arc<StudioSync>>,
     debug_sync: &Option<Arc<DebugSync>>,
     lockfile: &mut Lockfile,
+    studio_expected_files: &mut Option<&mut HashSet<String>>,
 ) -> u32 {
     // Process files in parallel
     let pending_results: Vec<Result<RawPending, ProcessingError>> = paths
@@ -180,10 +182,21 @@ pub async fn process_raw(
         match target {
             Target::Studio => {
                 dispatched += 1;
-                let rel = format!("{}.{}", p.name, p.kind.api_type().to_lowercase());
+                let ext = p.path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                let rel = if ext.is_empty() {
+                    p.name.clone()
+                } else {
+                    format!("{}.{}", p.name, ext)
+                };
                 let uri = if let Some(ss) = studio_sync {
                     match ss.copy_asset(&rel, &p.bytes) {
-                        Ok(u) => u,
+                        Ok(u) => {
+                            // Track expected file for Studio sync cleanup
+                            if let Some(ref mut set) = *studio_expected_files {
+                                set.insert(rel.clone());
+                            }
+                            u
+                        }
                         Err(e) => {
                             clear_progress_line();
                             log!(warn, "Studio copy failed for \"{}\": {}", p.name, e);

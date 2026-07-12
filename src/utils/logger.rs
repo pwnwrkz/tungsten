@@ -6,11 +6,11 @@ macro_rules! log {
         use colored::Colorize;
         let msg = format!($($arg)*);
         match stringify!($level) {
-            "info"    => println!("{} {}", "∙".white().bold(), msg.white()),
-            "success" => println!("{} {}", "✓".green().bold(), msg.green()),
-            "warn"    => println!("{} {}", "⚠".yellow().bold(), msg.yellow()),
-            "error"   => println!("{} {}", "✗".red().bold(), msg.red()),
-            "section" => println!("\n{} {}{}", "──".cyan().bold(), msg.cyan().bold(), " ──".cyan().bold()),
+            "info"    => println!("{} {}", "[INFO]   ".white().bold(), msg.white()),
+            "success" => println!("{} {}", "[SUCCESS]".green().bold(), msg.green()),
+            "warn"    => println!("{} {}", "[WARNING]".yellow().bold(), msg.yellow()),
+            "error"   => println!("{} {}", "[ERROR]  ".red().bold(), msg.red()),
+            "section" => println!("\n{} {}{}", "[ ".cyan().bold(), msg.cyan().bold(), "  ]".cyan().bold()),
             _         => println!("{}", msg),
         }
     }};
@@ -25,7 +25,7 @@ const ITEM_WIDTH: usize = 36;
 /// Render a labelled progress bar on the current line (no newline unless done).
 ///
 /// ```text
-///   Uploading    [████████░░░░░░░░░░░░░░░░░░░░]  40%   2/5   my_icon.png
+/// Uploading    [████████░░░░░░░░░░░░░░░░░░░░]  40%   2/5   my_icon.png
 /// ```
 ///
 /// When `current >= total` the line is finalized with a newline.
@@ -41,6 +41,10 @@ pub fn progress(phase: &str, current: usize, total: usize, item: &str) {
     let empty = BAR_WIDTH - filled;
     let percent = (ratio * 100.0).floor() as usize;
 
+    let num_width = total.to_string().len();
+    let current_str = format!("{:>width$}", current, width = num_width);
+    let total_str = format!("{:>width$}", total, width = num_width);
+
     let bar = format!(
         "{}{}",
         "█".repeat(filled).green().bold(),
@@ -55,12 +59,12 @@ pub fn progress(phase: &str, current: usize, total: usize, item: &str) {
     };
 
     let line = format!(
-        "  {:<phase_w$} [{}] {:>3}%  {}/{} {:<item_w$}",
+        "{:<phase_w$} [{}] {:>3}%  {}/{}  {:<item_w$}",
         phase.cyan().bold(),
         bar,
         percent.to_string().cyan(),
-        current.to_string().bold(),
-        total.to_string().bold(),
+        current_str.bold(),
+        total_str.bold(),
         item_display.dimmed(),
         phase_w = PHASE_WIDTH,
         item_w = ITEM_WIDTH,
@@ -69,13 +73,13 @@ pub fn progress(phase: &str, current: usize, total: usize, item: &str) {
     if current >= total {
         // Finalize: overwrite with a clean ✓ line and move to the next line.
         let done_line = format!(
-            "  {} {:<phase_w$} [{}] {}  {}/{}",
-            "✓".green().bold(),
+            "{} {:<phase_w$} [{}] {}  {}/{}",
+            "[SUCCESS]".green().bold(),
             phase.cyan().bold(),
             "█".repeat(BAR_WIDTH).green().bold(),
             "100%".cyan(),
-            total.to_string().bold(),
-            total.to_string().bold(),
+            total_str.bold(),
+            total_str.bold(),
             phase_w = PHASE_WIDTH,
         );
         println!("\r{}", done_line);

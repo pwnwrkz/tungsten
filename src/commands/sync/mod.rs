@@ -5,6 +5,8 @@ pub mod packed;
 pub mod paths;
 pub mod raw;
 
+use std::collections::HashSet;
+use std::fs;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
@@ -73,7 +75,7 @@ pub async fn run(
         let key = api_key.as_deref().ok_or_else(|| {
             anyhow::anyhow!(
                 "No API key provided\n  \
-                 Provide one via --api-key, tungsten_api_key.env (API_KEY=...), \
+                 Provide one via --api-key, .env (TUNGSTEN_API_KEY=...), \
                  or the TUNGSTEN_GLOBAL_APIKEY environment variable.\n  \
                  Generate a key at https://create.roblox.com/credentials \
                  with \"Assets: Read & Write\" permissions"
@@ -85,7 +87,16 @@ pub async fn run(
     };
 
     let studio_sync: Option<Arc<StudioSync>> = if target == Target::Studio && !dry_run {
-        match StudioSync::new() {
+        let studio_path = config
+            .studio
+            .as_ref()
+            .and_then(|s| s.studio_path.clone());
+        let auto_route_version = config
+            .studio
+            .as_ref()
+            .map(|s| s.auto_route_version)
+            .unwrap_or(false);
+        match StudioSync::new(studio_path, auto_route_version) {
             Ok(s) => {
                 log!(info, "Studio sync folder: {}", s.sync_path().display());
                 Some(Arc::new(s))
@@ -110,6 +121,13 @@ pub async fn run(
                 return Err(e);
             }
         }
+    } else {
+        None
+    };
+
+    let mut studio_expected_files_storage = HashSet::new();
+    let mut studio_expected_files = if target == Target::Studio {
+        Some(&mut studio_expected_files_storage)
     } else {
         None
     };
@@ -158,7 +176,6 @@ pub async fn run(
         log!(info, "{} file(s) found", paths.len());
 
         let base_path = glob_base(&input.path);
-        let svg_scale = input.resolved_svg_scale();
         let compress_options = input.resolved_compress_options();
         let compress_opts_ref = compress_options.as_ref();
         let bleed = input.resolved_bleed();
@@ -190,6 +207,7 @@ pub async fn run(
                 &studio_sync,
                 &debug_sync,
                 &mut lockfile,
+                &mut studio_expected_files,
             )
             .await;
             total_errors += errs;
@@ -220,7 +238,8 @@ pub async fn run(
                             .with_extension("")
                             .to_string_lossy()
                             .replace('\\', "/");
-                        let png_bytes = convert::svg_to_png(&data, svg_scale)
+                        let scale = input.effective_svg_scale(path, &base);
+                        let png_bytes = convert::svg_to_png(&data, scale)
                             .map_err(|e| {
                                 clear_progress_line();
                                 log!(warn, "Failed to rasterize \"{}\": {}", path.display(), e);
@@ -290,6 +309,7 @@ pub async fn run(
                     &studio_sync,
                     &debug_sync,
                     &mut lockfile,
+                    &mut studio_expected_files,
                 )
                 .await
             } else {
@@ -297,7 +317,7 @@ pub async fn run(
                     input_name,
                     images,
                     image_paths,
-                    svg_scale,
+                    0.0, // svg_scale unused; per‑file scale handled above
                     &base_path,
                     &input.output_path,
                     &codegen_style,
@@ -313,6 +333,7 @@ pub async fn run(
                     &studio_sync,
                     &debug_sync,
                     &mut lockfile,
+                    &mut studio_expected_files,
                 )
                 .await
             };
@@ -323,6 +344,59 @@ pub async fn run(
     if let Err(e) = lockfile.save() {
         log!(warn, "Failed to save lockfile: {}", e);
         total_errors += 1;
+    }
+
+    // Cleanup stale files in Studio sync folder (only for Studio target)
+    if target == Target::Studio
+        && let Some(studio_sync) = &studio_sync
+    {
+        let expected_files = &studio_expected_files_storage;
+        let sync_path = studio_sync.sync_path();
+
+        // Safely collect actual files (only files, not directories)
+        let actual_files: HashSet<String> = match fs::read_dir(sync_path) {
+            Ok(read_dir) => read_dir
+                .filter_map(|entry| {
+                    let entry = match entry {
+                        Ok(e) => e,
+                        Err(e) => {
+                            log!(warn, "Failed to read directory entry: {}", e);
+                            return None;
+                        }
+                    };
+                    let path = entry.path();
+                    if path.is_file() {
+                        path.file_name()
+                            .and_then(|n| n.to_str())
+                            .map(|s| s.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            Err(e) => {
+                log!(
+                    warn,
+                    "Failed to read sync directory {}: {}",
+                    sync_path.display(),
+                    e
+                );
+                HashSet::new()
+            }
+        };
+
+        // Remove files that are not in our expected set
+        for file in actual_files.difference(expected_files) {
+            let file_path = sync_path.join(file);
+            if let Err(e) = fs::remove_file(&file_path) {
+                log!(
+                    warn,
+                    "Failed to remove stale Studio sync file '{}': {}",
+                    file,
+                    e
+                );
+            }
+        }
     }
 
     log!(section, "Done");
