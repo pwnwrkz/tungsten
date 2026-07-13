@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated SVG scaling to use per-file scale based on viewBox rather than global input scale
 - Changed log output format from symbols (∙, ✓, ⚠, ✗) to bracketed labels ([INFO], [SUCCESS], [WARNING], [ERROR]) for better readability
 - Changed progress bar format: removed leading spaces, added zero-padded counters aligned to total width, and updated completion line to use [SUCCESS] label
+- Changed API key loading to use standard `.env` files with `TUNGSTEN_API_KEY` instead of `tungsten_api_key.env` files
 
 ### Fixed
 
