@@ -194,13 +194,13 @@ impl InputConfig {
             }
         } else {
             // Directory: <dir>.tmeta (i.e., parent directory contains <dir_name>.tmeta)
-            let dir_name = match item.file_name() {
-                Some(n) => n.to_os_string(),
-                None => return None,
+            let dir_name = {
+                let n = item.file_name()?;
+                n.to_os_string()
             };
-            let mut parent = match item.parent() {
-                Some(p) => p.to_path_buf(),
-                None => return None,
+            let mut parent = {
+                let p = item.parent()?;
+                p.to_path_buf()
             };
             parent.push(dir_name);
             parent.set_extension("tmeta");

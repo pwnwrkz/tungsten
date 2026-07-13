@@ -87,10 +87,7 @@ pub async fn run(
     };
 
     let studio_sync: Option<Arc<StudioSync>> = if target == Target::Studio && !dry_run {
-        let studio_path = config
-            .studio
-            .as_ref()
-            .and_then(|s| s.studio_path.clone());
+        let studio_path = config.studio.as_ref().and_then(|s| s.studio_path.clone());
         let auto_route_version = config
             .studio
             .as_ref()
