@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed studio sync incorrectly changing file extensions for audio and model assets (e.g., .mp3 to .audio, .rbxm to .model) when syncing to Studio target
 
+### Removed
+
+- Removed adding `tungsten_api_key.env` into the project's `.gitignore` as it's no longer being used.
+
 ## [v3.0.0-rc.1]
 
 ### Added
