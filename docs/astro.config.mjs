@@ -43,7 +43,11 @@ export default defineConfig({
         },
         {
           label: "Reference",
-          autogenerate: { directory: "reference" },
+          items: [
+            { label: "CLI", slug: "reference/cli" },
+            { label: "Configuration", slug: "reference/configuration" },
+            { label: "Meta Files", slug: "reference/meta-files" },
+          ],
         },
       ],
     }),
