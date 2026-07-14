@@ -11,7 +11,7 @@ Tungsten is a high-performance command-line utility for managing, packing, and s
 
 Created out of frustration during the development of [LucideRoblox](https://github.com/notmagniill/LucideRoblox), Tungsten was built to address the stagnation in the Roblox ecosystem. While existing tools like Tarmac and Asphalt provided the foundation, they either lacked features or were hindered by aging infrastructure.
 
-Tungsten bridges this gap by combining the best of the industry’s past with the modern demands of Roblox’s Open Cloud API.
+Tungsten bridges this gap by combining the best of the industry's past with the modern demands of Roblox's Open Cloud API.
 
 ## Features
 
@@ -22,12 +22,9 @@ Tungsten bridges this gap by combining the best of the industry’s past with th
 - **Code Generation:** Automatically generate type-safe Luau code and TypeScript declaration files to reference your assets.
 - **Smart Initialization:** Auto-detects project folders and instantly generates a valid configuration structure.
 - **Watch Mode:** Experience live, instant syncing the moment your files change. Similar to `rojo serve`.
-
-### Developer Experience
-
-- **SVG Rasterization:** Native, high-fidelity rasterization from SVG to PNG.
-- **Image Compression:** Lossless image compression built directly into Tungsten powered by `libcaesium`.
-- **High DPI Detection:** Automated scaling for high-resolution displays.
+- **Native SVG Rasterization:** High-fidelity SVG to PNG conversion without external tools.
+- **Built-in Image Compression:** Powered by `libcaesium`. Optimize JPEG/PNG quality and strip metadata locally.
+- **High DPI / Retina Support:** Automatic @2x, @3x detection with generated Luau DPI-switching functions.
 - **Metadata Support:** Define custom names and descriptions via `.tmeta` files.
 - **Flexible Targets:** Seamlessly switch between User and Group-owned assets.
 
@@ -37,7 +34,7 @@ Tungsten bridges this gap by combining the best of the industry’s past with th
 - **Video Syncing:** Sync video assets over to Roblox.
 
 :::tip
-Have a feature request? We’d love to hear it! Open an issue with the `enhancement` tag at Tungsten's [GitHub repository](https://github.com/pwnwrkz/tungsten).
+Have a feature request? We'd love to hear it! Open an issue with the `enhancement` tag at Tungsten's [GitHub repository](https://github.com/pwnwrkz/tungsten).
 :::
 
 ## Choosing the Right Tool
@@ -45,7 +42,7 @@ Have a feature request? We’d love to hear it! Open an issue with the `enhancem
 Asset management is the backbone of your pipeline. Here is how Tungsten compares to other tools:
 
 | Feature                     | Tungsten                          | Asphalt                                  | Tarmac          |
-| :-------------------------- | :-------------------------------- | :--------------------------------------- | :-------------- |
+| --------------------------- | --------------------------------- | ---------------------------------------- | --------------- |
 | **Status**                  | ✅ Active                         | ✅ Active                                | ❌ Deprecated   |
 | **API**                     | Open Cloud                        | Open Cloud                               | Legacy Web API  |
 | **Spritesheet Packing**     | ✅ Supported                      | ❌ No                                    | ⚠️ Partial [^1] |
@@ -55,7 +52,7 @@ Asset management is the backbone of your pipeline. Here is how Tungsten compares
 
 ### Recommendation
 
-- **Choose Tungsten** for your primary workflow. It is the all-in-one solution for modern asset management, offering superior packing, SVG conversion, and an developer-first experience.
+- **Choose Tungsten** for your primary workflow. It is the all-in-one solution for modern asset management, offering superior packing, SVG conversion, compression, and a developer-first experience.
 - **Choose Asphalt** if your project specifically requires **Video** asset uploads or **external asset mapping**, as these features are currently not supported in Tungsten.
 - **Avoid Tarmac.** It relies on deprecated Web APIs and fails to sync, making it unsuitable for modern Roblox development.
 

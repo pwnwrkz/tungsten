@@ -1,6 +1,6 @@
 ---
 title: Advanced Workflows
-description: Explore Tungsten's power-user features, including live watch mode, automatic high DPI scaling, and CI/CD integration.
+description: Explore Tungsten's power-user features, including live watch mode, automatic high DPI scaling, performance optimizations, and CI/CD integration.
 ---
 
 import { Aside, Steps } from "@astrojs/starlight/components";
@@ -12,7 +12,7 @@ Once you have mastered basic syncing and asset packing, you can leverage Tungste
 
 `tungsten watch` is the foundation of a modern, efficient developer loop. Instead of manually executing sync for every minor change, Tungsten maintains a persistent connection to your project directory.
 
-Any modification to your assets. Whether you are adding a new icon, updating a texture, or tweaking a sprite. Triggers an immediate, incremental sync. This keeps your local development environment perfectly in sync with the Roblox cloud.
+Any modification to your assets — whether you are adding a new icon, updating a texture, or tweaking a sprite — triggers an immediate, incremental sync. This keeps your local development environment perfectly in sync with the Roblox cloud.
 
 ### Usage
 
@@ -32,19 +32,19 @@ To optimize for performance and reduce loading times for your players, Tungsten 
 
 ### How it works
 
-Compression is configured on a per-input basis within your tungsten.toml. When the compress_options table is present, Tungsten intercepts the sync process to optimize your images locally.
+Compression is configured on a per-input basis within your `tungsten.toml`. When the `compress_options` table is present, Tungsten intercepts the sync process to optimize your images locally.
 
 This is particularly useful for:
 
-- **Background Textures**: High-resolution JPEGs can be significantly compressed with minimal visual loss.
-- **UI Icons**: Stripping metadata from PNGs ensures your icons use the least amount of space possible.
-- **Large Spritesheets**: Reducing the "weight" of a packed sheet improves reliability when syncing over slower connections.
+- **Background Textures:** High-resolution JPEGs can be significantly compressed with minimal visual loss.
+- **UI Icons:** Stripping metadata from PNGs ensures your icons use the least amount of space possible.
+- **Large Spritesheets:** Reducing the "weight" of a packed sheet improves reliability when syncing over slower connections.
 
 Why use it?
 
-- **Faster Initial Load**: Smaller assets appear faster for players, especially on mobile devices or limited bandwidth.
-- **Privacy**: By defaulting keep_metadata to false, you ensure that hidden data (like export timestamps or software signatures) is stripped before the asset reaches the Roblox cloud.
-- **Zero-Cloud Processing**: All compression happens on your machine. Your raw, uncompressed assets never leave your computer, and no third-party services are used to process your data.
+- **Faster Initial Load:** Smaller assets appear faster for players, especially on mobile devices or limited bandwidth.
+- **Privacy:** By defaulting `keep_metadata` to `false`, you ensure that hidden data (like export timestamps or software signatures) is stripped before the asset reaches the Roblox cloud.
+- **Zero-Cloud Processing:** All compression happens on your machine. Your raw, uncompressed assets never leave your computer, and no third-party services are used to process your data.
 
 :::note[Info]
 For a full breakdown of the available compression fields, including quality and metadata settings, refer to the [Configuration Reference](/tungsten/reference/configuration).
@@ -58,11 +58,11 @@ Set `ts_declaration = true` in your `[codegen]` block. This ensures that your ID
 
 ## Meta Files
 
-Meta files (`.tmeta`) allow you to customize the metadata of your assets, such as their names and descriptions—on the Roblox website.
+Meta files (`.tmeta`) allow you to customize the metadata of your assets, such as their names and descriptions on the Roblox website.
 
 ### Asset Metadata
 
-To apply metadata to a specific asset, create a file with the same name as the asset, with it's file format changed to `.tmeta`.
+To apply metadata to a specific asset, create a file with the same name as the asset, with the `.tmeta` extension.
 
 Example:
 
@@ -100,7 +100,7 @@ Example Structure:
 
 </FileTree>
 
-Inside icons.tmeta:
+Inside `icons.tmeta`:
 
 ```toml title="icons.tmeta"
 name = "UIIcons"
@@ -111,8 +111,21 @@ When Tungsten uploads the generated spritesheets, they will appear in your Roblo
 
 - `UIIcons_001`
 - `UIIcons_002`
+- ...and so on.
 
-...and so on.
+### SVG Scale Cascade
+
+You can set `svg_scale` at the directory level to affect all SVGs within, with per-file overrides available.
+
+```toml title="assets/icons.tmeta"
+svg_scale = 2.0  # All SVGs in icons/ rasterize at 2x unless overridden
+```
+
+Child files can override:
+
+```toml title="assets/icons/special.svg.tmeta"
+svg_scale = 4.0  # This specific SVG uses 4x
+```
 
 You can read the meta file's reference if you need more information.
 
@@ -122,13 +135,39 @@ Custom names are especially useful for keeping your Create dashboard organized, 
 
 ## High DPI Detection
 
-Tungsten is built to handle high-resolution displays natively. There is no need for manual configuration or settings; Tungsten automatically detects standard high-resolution suffixes (such as @2x or @3x) in your asset filenames.
+Tungsten is built to handle high-resolution displays natively. There is no need for manual configuration or settings; Tungsten automatically detects standard high-resolution suffixes (such as `@2x` or `@3x`) in your asset filenames.
 
 Upon detection, Tungsten automatically generates Luau helper functions that allow you to toggle between DPI scales. This keeps your images crisp and properly sized on high-DPI displays without additional overhead.
 
+Example file structure:
+
+<FileTree>
+
+- assets/
+  - icons/
+    - home.png
+    - **home@2x.png**
+    - **home@3x.png**
+
+</FileTree>
+
+Generated Luau:
+
+```lua
+local function getHomeIcon(dpiScale)
+	if dpiScale >= 3 then
+		return "rbxassetid://123"  -- home@3x
+	elseif dpiScale >= 2 then
+		return "rbxassetid://124"  -- home@2x
+	else
+		return "rbxassetid://125"  -- home
+	end
+end
+```
+
 ## CI/CD Integration
 
-For teams or larger projects, you should avoid syncing assets from individual local machines. Tungsten is able to do CI/CD integration.
+For teams or larger projects, you should avoid syncing assets from individual local machines. Tungsten is designed for CI/CD integration.
 
 By utilizing the `TUNGSTEN_GLOBAL_APIKEY` environment variable in your GitHub Actions or GitLab CI runners, you can fully automate your asset pipeline.
 
@@ -140,9 +179,10 @@ By utilizing the `TUNGSTEN_GLOBAL_APIKEY` environment variable in your GitHub Ac
 
 2. #### Automate Sync
 
-   Add a step to your CI workflow to run tungsten sync cloud.
+   Add a step to your CI workflow to run `tungsten sync cloud`.
 
 3. #### Validate First
+
    Always use the `--dry-run` flag in your CI pipeline to validate your configuration, packing logic, and file structure without consuming your upload quota.
 
 </Steps>
@@ -150,5 +190,29 @@ By utilizing the `TUNGSTEN_GLOBAL_APIKEY` environment variable in your GitHub Ac
 :::tip
 Using `--dry-run` on every push ensures that no broken assets or misconfigured packs ever reach your production environment.
 :::
+
+## Performance Tuning
+
+### Upload Concurrency
+
+Control parallel uploads via `tungsten.toml`:
+
+```toml title="tungsten.toml"
+max_concurrent_uploads = 20  # Default: 10
+```
+
+Increase for high-bandwidth connections; decrease if hitting Roblox rate limits.
+
+### Incremental Sync
+
+Tungsten maintains a `tungsten.lock.toml` lockfile that tracks uploaded assets by content hash. On subsequent runs, unchanged assets are skipped entirely — no re-upload, no re-processing.
+
+To force a full re-sync, delete the lockfile:
+
+```bash title="Terminal"
+rm tungsten.lock.toml
+```
+
+---
 
 Congratulations on mastering the Tungsten pipeline! We hope you have a great experience using Tungsten!
