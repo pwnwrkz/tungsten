@@ -42,6 +42,7 @@ struct ProcessingError {
 }
 
 /// Optionally compress PNG bytes before upload.
+#[inline]
 fn maybe_compress_png(bytes: Vec<u8>, compress_options: Option<&CompressOptions>) -> Vec<u8> {
     let Some(opts) = compress_options else {
         return bytes;
@@ -57,6 +58,7 @@ fn maybe_compress_png(bytes: Vec<u8>, compress_options: Option<&CompressOptions>
 }
 
 /// Process a single image for individual asset processing (synchronous version for parallel processing)
+#[inline]
 fn process_single_image_sync(
     img: crate::core::assets::img::pack::InputImage,
     paths: &[PathBuf],
@@ -131,6 +133,7 @@ pub async fn process_individual(
     debug_sync: &Option<Arc<DebugSync>>,
     lockfile: &mut Lockfile,
     studio_expected_files: &mut Option<&mut HashSet<String>>,
+    max_concurrent_uploads: usize,
 ) -> u32 {
     let mut errors: u32 = 0;
     let total = images.len();
@@ -169,9 +172,8 @@ pub async fn process_individual(
 
     let mut codegen_entries: Vec<CodegenEntry> = Vec::with_capacity(total);
 
-    // Configure upload concurrency limit (can be made configurable later)
-    const MAX_CONCURRENT_UPLOADS: usize = 10;
-    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_UPLOADS));
+    // Configure upload concurrency limit from config
+    let semaphore = Arc::new(Semaphore::new(max_concurrent_uploads));
 
     let mut upload_tasks: JoinSet<Result<(String, u64, String)>> = JoinSet::new();
     let mut dispatched = 0usize;
@@ -279,20 +281,27 @@ pub async fn process_individual(
         }
     }
 
-    // DPI group variants - keep sequential for now to avoid complexity
-    // TODO: Parallelize DPI variant processing in a future iteration
-    for (base_name, variants) in dpi_groups {
-        if dry_run {
-            dispatched += 1;
-            progress("Uploading", dispatched, total, base_name.as_str());
-            let fake: Vec<(u8, u64)> = variants.iter().map(|(s, _)| (*s, 0)).collect();
-            codegen_entries.push(CodegenEntry::dpi_group(base_name.to_string(), fake));
-            continue;
-        }
+    // DPI group variants - pre-process in parallel using rayon, then upload in parallel
+    struct DpiVariantTask {
+        base_name: String,
+        scale: u8,
+        bytes: Vec<u8>,
+        hash: String,
+    }
 
-        let mut resolved_variants: Vec<(u8, u64)> = Vec::with_capacity(variants.len());
-
+    // Collect all DPI variants for parallel pre-processing
+    let mut dpi_variants_to_process: Vec<(String, u8, crate::core::assets::img::pack::InputImage)> =
+        Vec::new();
+    for (base_name, variants) in &dpi_groups {
         for (scale, img) in variants {
+            dpi_variants_to_process.push((base_name.clone(), *scale, img.clone()));
+        }
+    }
+
+    // Pre-process DPI variants in parallel (encode, bleed, compress, hash)
+    let dpi_variant_tasks: Vec<DpiVariantTask> = dpi_variants_to_process
+        .into_par_iter()
+        .filter_map(|(base_name, scale, img)| {
             let mut rgba = img.image.clone();
             if bleed {
                 alpha_bleed(&mut rgba);
@@ -302,68 +311,99 @@ pub async fn process_individual(
                 Err(e) => {
                     clear_progress_line();
                     log!(warn, "Failed to encode {}@{}x: {}", base_name, scale, e);
-                    errors += 1;
-                    continue;
+                    // Can't easily increment errors here, track via return value
+                    return None;
                 }
             };
-
             let bytes = maybe_compress_png(bytes, compress_options);
             let hash = hash_image(&bytes);
+            Some(DpiVariantTask {
+                base_name,
+                scale,
+                bytes,
+                hash,
+            })
+        })
+        .collect();
 
+    // Group tasks by base_name for codegen output
+    let mut dpi_tasks_by_base: std::collections::HashMap<String, Vec<DpiVariantTask>> =
+        std::collections::HashMap::new();
+    for task in dpi_variant_tasks {
+        dpi_tasks_by_base
+            .entry(task.base_name.clone())
+            .or_default()
+            .push(task);
+    }
+
+    // Process DPI variants
+    let mut dpi_upload_tasks: JoinSet<Result<(String, u8, u64, String)>> = JoinSet::new();
+
+    for (base_name, tasks) in dpi_tasks_by_base {
+        if dry_run {
+            dispatched += 1;
+            progress("Uploading", dispatched, total, base_name.as_str());
+            let fake: Vec<(u8, u64)> = tasks.iter().map(|t| (t.scale, 0)).collect();
+            codegen_entries.push(CodegenEntry::dpi_group(base_name, fake));
+            continue;
+        }
+
+        for task in tasks {
             match target {
                 Target::Cloud => {
-                    if let Some(cached) = lockfile.get(input_name, &hash) {
+                    if let Some(cached) = lockfile.get(input_name, &task.hash) {
                         dispatched += 1;
                         progress("Uploading", dispatched, total, base_name.as_str());
-                        resolved_variants.push((scale, cached));
+                        codegen_entries.push(CodegenEntry::dpi_group(
+                            base_name.clone(),
+                            vec![(task.scale, cached)],
+                        ));
                         continue;
                     }
                     let Some(c) = client else {
-                        resolved_variants.push((scale, 0));
+                        codegen_entries.push(CodegenEntry::dpi_group(
+                            base_name.clone(),
+                            vec![(task.scale, 0)],
+                        ));
                         continue;
                     };
                     let file_name = format!(
                         "{}@{}x.png",
                         base_name.rsplit('/').next().unwrap_or(&base_name),
-                        scale
+                        task.scale
                     );
-                    match c
-                        .upload(UploadParams {
-                            file_name,
-                            display_name: format!("{}@{}x", base_name, scale),
-                            description: "Uploaded by Tungsten".to_string(),
-                            data: bytes,
-                            kind: AssetKind::Image(ImageFormat::Png),
-                            asset_type_override: Some(asset_type.to_string()),
-                            creator: creator.clone(),
-                        })
-                        .await
-                    {
-                        Ok(id) => {
-                            lockfile.set(input_name, hash, id);
-                            dispatched += 1;
-                            progress("Uploading", dispatched, total, base_name.as_str());
-                            resolved_variants.push((scale, id));
-                        }
-                        Err(e) => {
-                            clear_progress_line();
-                            log!(
-                                warn,
-                                "Upload failed for \"{}\" @{}x: {}",
-                                base_name,
-                                scale,
-                                e
-                            );
-                            errors += 1;
-                        }
-                    }
+                    let c_arc = Arc::clone(c);
+                    let base_name_clone = base_name.clone();
+                    let hash_clone = task.hash.clone();
+                    let bytes_clone = task.bytes.clone();
+                    let scale = task.scale;
+                    let creator_clone = creator.clone();
+                    let asset_type_clone = asset_type.to_string();
+                    let semaphore_clone = semaphore.clone();
+                    dpi_upload_tasks.spawn(async move {
+                        let _permit = semaphore_clone.acquire_owned().await;
+                        let id = c_arc
+                            .upload(UploadParams {
+                                file_name,
+                                display_name: format!("{}@{}x", base_name_clone, scale),
+                                description: "Uploaded by Tungsten".to_string(),
+                                data: bytes_clone,
+                                kind: AssetKind::Image(ImageFormat::Png),
+                                asset_type_override: Some(asset_type_clone),
+                                creator: creator_clone,
+                            })
+                            .await
+                            .with_context(|| {
+                                format!("Failed to upload \"{}\" @{}x", base_name_clone, scale)
+                            })?;
+                        Ok((base_name_clone, scale, id, hash_clone))
+                    });
                 }
                 Target::Studio => {
-                    let rel = format!("{}@{}x.png", base_name, scale);
+                    let rel = format!("{}@{}x.png", base_name, task.scale);
                     let uri = if let Some(ss) = studio_sync {
-                        match ss.copy_asset(&rel, &bytes) {
+                        match ss.copy_asset(&rel, &task.bytes) {
                             Ok(u) => {
-                                // Track expected file for Studio sync cleanup
                                 if let Some(ref mut set) = *studio_expected_files {
                                     set.insert(rel.clone());
                                 }
@@ -379,15 +419,21 @@ pub async fn process_individual(
                     } else {
                         String::new()
                     };
-                    lockfile.set_uri(input_name, hash.clone(), uri);
+                    lockfile.set_uri(input_name, task.hash.clone(), uri);
                     dispatched += 1;
                     progress("Copying", dispatched, total, &base_name);
-                    resolved_variants.push((scale, lockfile.get(input_name, &hash).unwrap_or(0)));
+                    codegen_entries.push(CodegenEntry::dpi_group(
+                        base_name.clone(),
+                        vec![(
+                            task.scale,
+                            lockfile.get(input_name, &task.hash).unwrap_or(0),
+                        )],
+                    ));
                 }
                 Target::Debug => {
-                    let rel = format!("{}@{}x.png", base_name, scale);
+                    let rel = format!("{}@{}x.png", base_name, task.scale);
                     if let Some(ds) = debug_sync
-                        && let Err(e) = ds.copy_asset(&rel, &bytes)
+                        && let Err(e) = ds.copy_asset(&rel, &task.bytes)
                     {
                         clear_progress_line();
                         log!(warn, "Debug copy failed: {}", e);
@@ -396,18 +442,47 @@ pub async fn process_individual(
                     }
                     dispatched += 1;
                     progress("Copying", dispatched, total, &base_name);
-                    resolved_variants.push((scale, lockfile.get(input_name, &hash).unwrap_or(0)));
+                    codegen_entries.push(CodegenEntry::dpi_group(
+                        base_name.clone(),
+                        vec![(
+                            task.scale,
+                            lockfile.get(input_name, &task.hash).unwrap_or(0),
+                        )],
+                    ));
                 }
             }
         }
+    }
 
-        if !resolved_variants.is_empty() {
-            resolved_variants.sort_by_key(|(s, _)| *s);
-            codegen_entries.push(CodegenEntry::dpi_group(
-                base_name.to_string(),
-                resolved_variants,
-            ));
+    // Collect Cloud DPI upload results
+    let mut dpi_results_by_base: std::collections::HashMap<String, Vec<(u8, u64)>> =
+        std::collections::HashMap::new();
+    while let Some(res) = dpi_upload_tasks.join_next().await {
+        match res {
+            Ok(Ok((base_name, scale, id, hash))) => {
+                lockfile.set(input_name, hash, id);
+                dpi_results_by_base
+                    .entry(base_name)
+                    .or_default()
+                    .push((scale, id));
+            }
+            Ok(Err(e)) => {
+                clear_progress_line();
+                log!(warn, "{}", e);
+                errors += 1;
+            }
+            Err(e) => {
+                clear_progress_line();
+                log!(warn, "DPI upload task panicked: {}", e);
+                errors += 1;
+            }
         }
+    }
+
+    // Add DPI group codegen entries for Cloud uploads
+    for (base_name, mut variants) in dpi_results_by_base {
+        variants.sort_by_key(|(s, _)| *s);
+        codegen_entries.push(CodegenEntry::dpi_group(base_name, variants));
     }
 
     // Cloud upload results

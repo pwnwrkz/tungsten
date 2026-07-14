@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use rayon::prelude::*;
 
 use crate::api::sync::debug::DebugSync;
 use crate::api::sync::roblox::Creator;
@@ -15,6 +16,7 @@ use crate::core::postsync::codegen::{self, CodegenEntry};
 use crate::core::postsync::lockfile::{Lockfile, hash_image};
 use crate::log;
 use crate::utils::logger::{clear_progress_line, progress};
+use image::RgbaImage;
 
 use super::Target;
 use super::codegen_write::write_codegen;
@@ -55,6 +57,7 @@ pub async fn process_packed(
     debug_sync: &Option<Arc<DebugSync>>,
     lockfile: &mut Lockfile,
     studio_expected_files: &mut Option<&mut HashSet<String>>,
+    _max_concurrent_uploads: usize,
 ) -> u32 {
     let mut errors: u32 = 0;
 
@@ -122,24 +125,51 @@ pub async fn process_packed(
         };
 
         let sheet_total = spritesheets.len();
-        for (idx, sheet) in spritesheets.iter().enumerate() {
-            let mut sheet_image = sheet.image.clone();
-            if bleed {
-                alpha_bleed(&mut sheet_image);
-            }
 
-            let png_bytes = match encode_png(&sheet_image) {
-                Ok(b) => b,
+        // Pre-process all sheets: bleed, encode, compress in parallel
+        #[derive(Debug)]
+        struct ProcessedSheet {
+            _image: RgbaImage,
+            bytes: Vec<u8>,
+            hash: String,
+        }
+
+        let processed_sheets: Vec<
+            Result<ProcessedSheet, Box<dyn std::error::Error + Send + Sync>>,
+        > = spritesheets
+            .par_iter()
+            .map(
+                |sheet| -> Result<ProcessedSheet, Box<dyn std::error::Error + Send + Sync>> {
+                    let mut sheet_image: RgbaImage = sheet.image.clone();
+                    if bleed {
+                        alpha_bleed(&mut sheet_image);
+                    }
+                    let png_bytes: Vec<u8> = encode_png(&sheet_image)?;
+                    let png_bytes: Vec<u8> = maybe_compress_png(png_bytes, compress_options);
+                    let hash: String = hash_image(&png_bytes);
+                    Ok(ProcessedSheet {
+                        _image: sheet_image,
+                        bytes: png_bytes,
+                        hash,
+                    })
+                },
+            )
+            .collect();
+
+        let mut codegen_entries = Vec::with_capacity(spritesheets.len() * 2);
+
+        for (idx, result) in processed_sheets.into_iter().enumerate() {
+            let processed = match result {
+                Ok(v) => v,
                 Err(e) => {
                     clear_progress_line();
-                    log!(warn, "Failed to encode sheet #{}: {}", idx + 1, e);
+                    log!(warn, "Failed to process sheet #{}: {}", idx + 1, e);
                     errors += 1;
                     continue;
                 }
             };
-
-            let png_bytes = maybe_compress_png(png_bytes, compress_options);
-            let hash = hash_image(&png_bytes);
+            let png_bytes = processed.bytes;
+            let hash = processed.hash;
             let sheet_name = format!("{}_{:03}", sheet_base, idx + 1);
             progress("Packing", idx + 1, sheet_total, &sheet_name);
 
@@ -170,7 +200,7 @@ pub async fn process_packed(
                 }
             };
 
-            for img in &sheet.images {
+            for img in &spritesheets[idx].images {
                 codegen_entries.push(CodegenEntry::sprite(
                     img.name.clone(),
                     asset_ref.clone(),

@@ -35,6 +35,7 @@ pub struct RawPending {
 
 /// Optionally compress `bytes` using the provided options.
 /// Returns the (possibly compressed) bytes.
+#[inline]
 fn maybe_compress(
     bytes: Vec<u8>,
     ext: &str,
@@ -63,6 +64,7 @@ fn maybe_compress(
 }
 
 /// Process a single raw file for asset processing (synchronous version for parallel processing)
+#[inline]
 fn process_single_raw_file(
     path: &PathBuf,
     base_path: &str,
@@ -140,6 +142,7 @@ pub async fn process_raw(
     debug_sync: &Option<Arc<DebugSync>>,
     lockfile: &mut Lockfile,
     studio_expected_files: &mut Option<&mut HashSet<String>>,
+    max_concurrent_uploads: usize,
 ) -> u32 {
     // Process files in parallel
     let pending_results: Vec<Result<RawPending, ProcessingError>> = paths
@@ -164,9 +167,8 @@ pub async fn process_raw(
     let total = pending.len();
     let mut codegen_entries: Vec<CodegenEntry> = Vec::with_capacity(total);
 
-    // Configure upload concurrency limit (can be made configurable later)
-    const MAX_CONCURRENT_UPLOADS: usize = 10;
-    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_UPLOADS));
+    // Configure upload concurrency limit from config
+    let semaphore = Arc::new(Semaphore::new(max_concurrent_uploads));
 
     let mut upload_tasks: JoinSet<Result<(String, u64, String)>> = JoinSet::new();
     let mut dispatched = 0usize;
