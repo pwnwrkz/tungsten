@@ -142,11 +142,7 @@ impl Lockfile {
 pub fn hash_image(data: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(data);
-    digest.iter().fold(String::with_capacity(64), |mut s, b| {
-        use std::fmt::Write;
-        let _ = write!(s, "{:02x}", b);
-        s
-    })
+    hex::encode(digest)
 }
 
 // Tests
