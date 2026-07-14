@@ -16,6 +16,14 @@ pub struct Config {
     /// Studio configuration (optional).
     #[serde(default)]
     pub studio: Option<StudioConfig>,
+    /// Maximum concurrent uploads to Roblox API (default: 10).
+    /// Increase for faster uploads if you have bandwidth, decrease if hitting rate limits.
+    #[serde(default = "default_max_concurrent_uploads")]
+    pub max_concurrent_uploads: usize,
+}
+
+fn default_max_concurrent_uploads() -> usize {
+    10
 }
 
 fn default_creator_type() -> String {

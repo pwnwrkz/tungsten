@@ -150,6 +150,8 @@ pub async fn run(
         .and_then(|c| c.ts_declaration)
         .unwrap_or(false);
 
+    let max_concurrent_uploads = config.max_concurrent_uploads;
+
     for (input_name, input) in &config.inputs {
         log!(section, "Syncing \"{}\"", input_name);
 
@@ -205,6 +207,7 @@ pub async fn run(
                 &debug_sync,
                 &mut lockfile,
                 &mut studio_expected_files,
+                max_concurrent_uploads,
             )
             .await;
             total_errors += errs;
@@ -307,6 +310,7 @@ pub async fn run(
                     &debug_sync,
                     &mut lockfile,
                     &mut studio_expected_files,
+                    max_concurrent_uploads,
                 )
                 .await
             } else {
@@ -331,6 +335,7 @@ pub async fn run(
                     &debug_sync,
                     &mut lockfile,
                     &mut studio_expected_files,
+                    max_concurrent_uploads,
                 )
                 .await
             };
