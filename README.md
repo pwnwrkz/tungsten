@@ -21,11 +21,8 @@ Read the Tungsten documentation [here](https://pwnwrkz.github.io/tungsten)
 
 - [notmagniill](https://github.com/notmagniill) - Everything
 
-### Feature Requests
-
-- [RuizuKun-Dev](https://github.com/RuizuKun-Dev) - Image compression and Studio syncing
-
 ### Special Thanks
 
 - [Jack Taylor](https://github.com/jackTabsCode) - [Asphalt](https://github.com/jackTabsCode/asphalt)
 - [The Rojo Team](https://github.com/rojo-rbx) and [Roblox](https://github.com/Roblox) - Tarmac ([Rojo](https://github.com/rojo-rbx/tarmac) or [Roblox](https://github.com/Roblox/tarmac) repository)
+- The community - for your ideas, love and support!
