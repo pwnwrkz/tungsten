@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v3.0.0] - 2026-07-14
+
+### Added
+
+- Optimized alpha bleeding algorithm (`alpha_bleed.rs`) — ~10-50x faster for spritesheets via bit-packed `Vec<u32>`, ring buffer, and 4-neighbor fast path
+- Configurable upload concurrency via `max_concurrent_uploads` in `tungsten.toml` (default: 10)
+- Studio sync cleanup logic to remove stale files from `.tungsten-debug/` folder
+- File tracking mechanism for Studio sync to track expected files during sync operations
+- `StudioConfig` section with `studio_path` and `auto_route_version` for advanced Studio path handling
+- Automatic version routing via `https://setup.roblox.com/versionQTStudio` when `auto_route_version` is enabled
+
+### Changed
+
+- Changed Studio sync behavior from wiping previous contents to incremental sync that preserves assets between Studio version updates
+- Updated SVG scaling to use per-file scale based on viewBox rather than global input scale
+- Changed log output format from symbols (∙, ✓, ⚠, ✗) to bracketed labels ([INFO], [SUCCESS], [WARNING], [ERROR]) for better readability
+- Changed progress bar format: removed leading spaces, added zero-padded counters aligned to total width, and updated completion line to use [SUCCESS] label
+- Changed API key loading to use standard `.env` files with `TUNGSTEN_API_KEY` instead of `tungsten_api_key.env` files
+- Improved variable naming in `src/core/assets/img/alpha_bleed.rs` for BFS algorithm readability
+- Added bleed configuration option to inputs to control alpha bleeding (defaults to true for backward compatibility)
+- Implemented automatic spritesheet packing similar to Adobe Animate:
+  - Sorts sprites by largest height first, then largest width first
+  - Uses rect packing algorithm with upright-only sprite placement
+  - Dynamically sizes atlases (calculates needed size, increases only when necessary)
+  - Enforces maximum atlas size of 1024x1024
+  - Automatically generates additional atlases when needed
+  - Trims final atlases to actual used space (removes empty padding)
+- Modified spritesheet packing to always use maximum atlas size (1024x1024) to minimize the number of sheets while trimming unused space
+- Parallel DPI variant pre-processing and upload (@2x, @3x via Rayon)
+- Parallel spritesheet bleed/encode/compress for multiple atlases
+- Lockfile hashing optimization using `hex::encode()` for SHA-256 digest formatting
+
+### Fixed
+
+- Fixed studio sync incorrectly changing file extensions for audio and model assets (e.g., .mp3 to .audio, .rbxm to .model) when syncing to Studio target
+
+### Removed
+
+- Removed adding `tungsten_api_key.env` into the project's `.gitignore` as it's no longer being used
+- Removed DPI variant packing support; high DPI variants are skipped for packing (waitlisted for manual upload) but still generate DPI group code entries
+
 ## [v3.0.0-rc.2]
 
 ### Added
