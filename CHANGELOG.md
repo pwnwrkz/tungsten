@@ -9,7 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Optimized alpha bleeding algorithm (`alpha_bleed.rs`) — ~10-50x faster for spritesheets via bit-packed `Vec<u32>`, ring buffer, and 4-neighbor fast path
 - Configurable upload concurrency via `max_concurrent_uploads` in `tungsten.toml` (default: 10)
 - Studio sync cleanup logic to remove stale files from `.tungsten-debug/` folder
 - File tracking mechanism for Studio sync to track expected files during sync operations
@@ -33,7 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Automatically generates additional atlases when needed
   - Trims final atlases to actual used space (removes empty padding)
 - Modified spritesheet packing to always use maximum atlas size (1024x1024) to minimize the number of sheets while trimming unused space
-- Parallel DPI variant pre-processing and upload (@2x, @3x via Rayon)
+- Optimized alpha bleeding algorithm (`alpha_bleed.rs`) — ~10-50x faster for spritesheets via bit-packed `Vec<u32>`, ring buffer, and 4-neighbor fast path
+- Parallel DPI variant pre-processing and upload (2x, 3x via Rayon)
 - Parallel spritesheet bleed/encode/compress for multiple atlases
 - Lockfile hashing optimization using `hex::encode()` for SHA-256 digest formatting
 
