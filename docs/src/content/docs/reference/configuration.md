@@ -27,6 +27,7 @@ auto_route_version = true  # Optional: fetch latest Studio version automatically
 
 # Example: UI Icons
 [inputs.icons]
+type = "image"
 path = "assets/icons/**/*"
 output_path = "src/Icons.luau"
 packable = true
@@ -35,6 +36,7 @@ bleed = true  # Optional: enable alpha bleeding (default: true)
 
 # Example: Large backgrounds
 [inputs.backgrounds]
+type = "image"
 path = "assets/backgrounds/**/*"
 output_path = "src/Backgrounds.luau"
 packable = false
@@ -49,10 +51,12 @@ keep_metadata = false
 
 # Example: Audio and Models
 [inputs.audio]
+type = "audio"
 path = "assets/audio/**/*"
 output_path = "src/Audio.luau"
 
 [inputs.models]
+type = "model"
 path = "assets/models/**/*"
 output_path = "src/Models.luau"
 ```
