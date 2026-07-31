@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
+use relative_path::RelativePathBuf;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 use toml;
 
+use crate::core::assets::asset::WebAsset;
 use crate::core::assets::img::compress::CompressOptions as ResolvedCompressOptions;
 
 const MIN_SVG_SCALE: f32 = 0.01;
@@ -128,6 +130,10 @@ pub struct StudioConfig {
 /// [inputs.icons.compress_options]
 /// jpeg_quality = 75
 /// png_quality = 75
+/// keep_metadata = false
+///
+/// [inputs.icons.web]
+/// "special-icon.png" = { id = 123456789 }
 /// ```
 #[derive(Deserialize)]
 pub struct InputConfig {
@@ -135,9 +141,10 @@ pub struct InputConfig {
     pub path: String,
     /// Path to the generated Luau/TypeScript file.
     pub output_path: String,
-    /// The Roblox asset type (e.g., "decal", "audio", "model"). Overrides the type inferred from file kind.
+    /// The Roblox asset type (e.g., "decal", "audio", "model").
+    /// Omit to automatically infer from file extension.
     #[serde(rename = "type")]
-    pub asset_type: String,
+    pub asset_type: Option<String>,
     /// Pack images into spritesheets. Only applies to image inputs.
     pub packable: Option<bool>,
     /// Scale factor applied when rasterizing SVG files (default: 1.0).
@@ -148,6 +155,11 @@ pub struct InputConfig {
     /// If present, compress images before upload using libcaesium.
     /// Omit the section entirely to skip compression.
     pub compress_options: Option<CompressOptions>,
+    /// A map of paths relative to the input path to existing assets on Roblox.
+    /// Keys are relative paths (using forward slashes), values are asset IDs.
+    /// These assets are included in generated code without uploading.
+    #[serde(default)]
+    pub web: HashMap<RelativePathBuf, WebAsset>,
 }
 
 impl InputConfig {
