@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use caesium::parameters::CSParameters;
-use rayon::prelude::*;
+use crate::log;
 
 /// Quality settings per format. All fields are optional — `None` keeps the
 /// caesium default for that format.
@@ -87,6 +87,20 @@ pub fn compress_image(data: &[u8], ext: &str, options: &CompressOptions) -> Resu
     }
 }
 
+/// Optionally compress PNG bytes before upload.
+pub fn maybe_compress_png(bytes: Vec<u8>, compress_options: Option<&CompressOptions>) -> Vec<u8> {
+    let Some(opts) = compress_options else {
+        return bytes;
+    };
+    match compress_image(&bytes, "png", opts) {
+        Ok(compressed) => compressed,
+        Err(e) => {
+            log!(warn, "Compression failed, using original: {}", e);
+            bytes
+        }
+    }
+}
+
 fn build_params(options: &CompressOptions) -> CSParameters {
     let mut params = CSParameters::new();
 
@@ -95,18 +109,6 @@ fn build_params(options: &CompressOptions) -> CSParameters {
     params.png.quality = options.png_quality;
 
     params
-}
-
-/// Compress multiple images in parallel using Rayon.
-/// Returns a vector of compressed bytes in the same order as input.
-#[allow(dead_code)]
-pub fn compress_images_parallel(
-    images: &[(&[u8], &str, &CompressOptions)],
-) -> Vec<Result<Vec<u8>>> {
-    images
-        .par_iter()
-        .map(|(data, ext, options)| compress_image(data, ext, options))
-        .collect()
 }
 
 // Tests
