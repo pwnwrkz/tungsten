@@ -6,11 +6,17 @@ macro_rules! log {
         use colored::Colorize;
         let msg = format!($($arg)*);
         match stringify!($level) {
-            "info"    => println!("{} {}", "[INFO]   ".white().bold(), msg.white()),
-            "success" => println!("{} {}", "[SUCCESS]".green().bold(), msg.green()),
-            "warn"    => println!("{} {}", "[WARNING]".yellow().bold(), msg.yellow()),
-            "error"   => println!("{} {}", "[ERROR]  ".red().bold(), msg.red()),
-            "section" => println!("\n{} {}{}", "[ ".cyan().bold(), msg.cyan().bold(), "  ]".cyan().bold()),
+            "info"    => println!("{} {}", " INFO    ".on_white().black().bold(), msg.white()),
+            "success" => println!("{} {}", " SUCCESS ".on_bright_green().green().bold(), msg.green()),
+            "warn"    => println!("{} {}", " WARNING ".on_bright_yellow().yellow().bold(), msg.yellow()),
+            "error"   => println!("{} {}", " ERROR   ".on_bright_red().red().bold(), msg.red()),
+            "section" => {
+                let width = crossterm::terminal::size()
+                    .map(|(w, _)| w as usize)
+                    .unwrap_or(120);
+                let padded = format!(" {}", msg);
+                println!("\n{}", format!("{:<width$}", padded, width = width).blue().bold().on_cyan());
+            }
             _         => println!("{}", msg),
         }
     }};
@@ -74,10 +80,10 @@ pub fn progress(phase: &str, current: usize, total: usize, item: &str) {
         // Finalize: overwrite with a clean ✓ line and move to the next line.
         let done_line = format!(
             "{} {:<phase_w$} [{}] {}  {}/{}",
-            "[SUCCESS]".green().bold(),
+            " SUCCESS ".on_green().black().bold(),
             phase.cyan().bold(),
             "█".repeat(BAR_WIDTH).green().bold(),
-            "100%".cyan(),
+            "100%".green(),
             total_str.bold(),
             total_str.bold(),
             phase_w = PHASE_WIDTH,
