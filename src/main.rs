@@ -68,14 +68,14 @@ async fn main() {
             println!();
             if is_watch {
                 if is_syncing.load(Ordering::Relaxed) {
-                    log!(error, "Watching was cancelled while a sync was in progress — some assets may not have been processed");
-                    log!(warn, "Re-run sync to resume; completed uploads are cached in tungsten.lock.toml");
+                    log!(error, "Watching was cancelled while a sync was in progress. Some assets may not have been processed");
+                    log!(warn, "Re-run sync to resume, completed uploads are cached in tungsten.lock.toml");
                 } else {
                     log!(warn, "Watching was cancelled");
                 }
             } else {
-                log!(error, "Tungsten was interrupted — operation did not complete");
-                log!(warn, "Re-run sync to resume; completed uploads are cached in tungsten.lock.toml");
+                log!(error, "Tungsten was interrupted. Operation did not complete");
+                log!(warn, "Re-run sync to resume, completed uploads are cached in tungsten.lock.toml");
             }
             std::process::exit(130);
         }
@@ -101,7 +101,7 @@ async fn run(cli: Cli, is_syncing: Arc<AtomicBool>) -> anyhow::Result<()> {
                     if dry_run {
                         commands::sync::Target::parse("debug")?
                     } else {
-                        anyhow::bail!("Target is required when not in dry run mode.");
+                        anyhow::bail!("Target is required when not in dry run mode.")
                     }
                 }
             };
