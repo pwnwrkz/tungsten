@@ -1,4 +1,6 @@
 use anyhow::{Context, Result};
+use rbx_binary::from_reader;
+use rbx_xml::from_reader as xml_from_reader;
 use serde::Deserialize;
 use std::path::Path;
 
@@ -37,6 +39,14 @@ pub enum AssetKind {
     Animation,
     /// Raw SVG, must be rasterized before upload.
     Svg,
+}
+
+/// An asset that exists on Roblox (for web asset mapping).
+/// Used in config to map local paths to existing Roblox asset IDs.
+#[derive(Debug, Deserialize, Clone)]
+pub struct WebAsset {
+    /// The asset ID on Roblox.
+    pub id: u64,
 }
 
 impl AssetKind {
@@ -107,6 +117,57 @@ pub fn kind_from_ext(ext: &str) -> Option<AssetKind> {
 /// Returns `true` if this extension is natively supported by Tungsten.
 pub fn is_supported_ext(ext: &str) -> bool {
     kind_from_ext(ext).is_some()
+}
+
+/// Represents the format of a Roblox model file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RobloxModelFormat {
+    Binary,
+    Xml,
+}
+
+/// Detects if a Roblox model file (.rbxm / .rbxmx) contains an animation
+/// (KeyframeSequence or CurveAnimation).
+///
+/// Returns `Ok(true)` if the root object is a KeyframeSequence or CurveAnimation,
+/// `Ok(false)` if it's a different class, or `Err` if parsing fails.
+pub fn is_animation(data: &[u8], format: RobloxModelFormat) -> Result<bool> {
+    let root_class = match format {
+        RobloxModelFormat::Binary => {
+            let dom = from_reader(data).context("Failed to parse binary Roblox model")?;
+            let root = dom.root();
+            let children = root.children();
+            let first_ref = children.first().context("No children found in root")?;
+            let first = dom
+                .get_by_ref(*first_ref)
+                .context("Failed to get first child")?;
+            first.class
+        }
+        RobloxModelFormat::Xml => {
+            let dom = xml_from_reader(data, Default::default())
+                .context("Failed to parse XML Roblox model")?;
+            let root = dom.root();
+            let children = root.children();
+            let first_ref = children.first().context("No children found in root")?;
+            let first = dom
+                .get_by_ref(*first_ref)
+                .context("Failed to get first child")?;
+            first.class
+        }
+    };
+
+    Ok(root_class == "KeyframeSequence" || root_class == "CurveAnimation")
+}
+
+/// Reads a Roblox model file from disk and checks if it's an animation.
+pub fn is_animation_file(path: &Path) -> Result<bool> {
+    let data = std::fs::read(path).context("Failed to read file")?;
+    let format = match path.extension().and_then(|e| e.to_str()) {
+        Some("rbxm") => RobloxModelFormat::Binary,
+        Some("rbxmx") => RobloxModelFormat::Xml,
+        _ => anyhow::bail!("Not a Roblox model file (.rbxm or .rbxmx)"),
+    };
+    is_animation(&data, format)
 }
 
 // Meta files
