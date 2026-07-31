@@ -1,9 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use rayon::prelude::*;
+use relative_path::RelativePathBuf;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
@@ -11,7 +12,7 @@ use crate::api::sync::debug::DebugSync;
 use crate::api::sync::roblox::Creator;
 use crate::api::sync::studio::StudioSync;
 use crate::api::upload::{RobloxClient, UploadParams};
-use crate::core::assets::asset::{self, AssetKind, AssetMeta};
+use crate::core::assets::asset::{self, AssetKind, AssetMeta, WebAsset, is_animation_file};
 use crate::core::assets::img::compress::CompressOptions;
 use crate::core::assets::img::convert;
 use crate::core::postsync::codegen::{self, CodegenEntry};
@@ -20,7 +21,7 @@ use crate::log;
 use crate::utils::logger::{clear_progress_line, progress};
 
 use super::Target;
-use super::codegen_write::write_codegen;
+use super::codegen_write::{seed_web_assets, write_codegen};
 use super::paths::relative_path;
 
 pub struct RawPending {
@@ -83,7 +84,20 @@ fn process_single_raw_file(
         .to_ascii_lowercase();
 
     let kind = match asset::kind_from_ext(&src_ext) {
-        Some(k) => k,
+        Some(k) => {
+            // Check if .rbxm/.rbxmx is actually an animation
+            if (src_ext == "rbxm" || src_ext == "rbxmx")
+                && k == AssetKind::Model(asset::ModelFormat::Roblox)
+            {
+                if is_animation_file(path).unwrap_or(false) {
+                    AssetKind::Animation
+                } else {
+                    k
+                }
+            } else {
+                k
+            }
+        }
         None => {
             return Err(ProcessingError {
                 name: path.display().to_string(),
@@ -136,14 +150,24 @@ pub async fn process_raw(
     target: Target,
     dry_run: bool,
     creator: &Creator,
-    asset_type: &str,
+    asset_type: Option<&str>,
     client: &Option<Arc<RobloxClient>>,
     studio_sync: &Option<Arc<StudioSync>>,
     debug_sync: &Option<Arc<DebugSync>>,
     lockfile: &mut Lockfile,
     studio_expected_files: &mut Option<&mut HashSet<String>>,
     max_concurrent_uploads: usize,
+    web_assets: &HashMap<RelativePathBuf, WebAsset>,
 ) -> u32 {
+    // Seed web assets into codegen entries first
+    let mut codegen_entries: Vec<CodegenEntry> = Vec::new();
+    seed_web_assets(
+        web_assets,
+        base_path,
+        strip_extension,
+        &mut codegen_entries,
+    );
+
     // Process files in parallel
     let pending_results: Vec<Result<RawPending, ProcessingError>> = paths
         .into_par_iter()
@@ -165,7 +189,6 @@ pub async fn process_raw(
     }
 
     let total = pending.len();
-    let mut codegen_entries: Vec<CodegenEntry> = Vec::with_capacity(total);
 
     // Configure upload concurrency limit from config
     let semaphore = Arc::new(Semaphore::new(max_concurrent_uploads));
@@ -183,38 +206,62 @@ pub async fn process_raw(
 
         match target {
             Target::Studio => {
-                dispatched += 1;
-                let ext = p.path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                let rel = if ext.is_empty() {
-                    p.name.clone()
-                } else {
-                    format!("{}.{}", p.name, ext)
-                };
-                let uri = if let Some(ss) = studio_sync {
-                    match ss.copy_asset(&rel, &p.bytes) {
-                        Ok(u) => {
-                            // Track expected file for Studio sync cleanup
-                            if let Some(ref mut set) = *studio_expected_files {
-                                set.insert(rel.clone());
-                            }
-                            u
-                        }
-                        Err(e) => {
+                // Models and Animations cannot be synced to Studio without prior upload
+                if matches!(p.kind, AssetKind::Model(_) | AssetKind::Animation) {
+                    dispatched += 1;
+                    let uri = match lockfile.get(input_name, &p.hash) {
+                        Some(cached_id) => format!("rbxassetid://{cached_id}"),
+                        None => {
                             clear_progress_line();
-                            log!(warn, "Studio copy failed for \"{}\": {}", p.name, e);
+                            log!(
+                                warn,
+                                "Models and Animations cannot be synced to Studio without having been uploaded first: \"{}\"",
+                                p.name
+                            );
                             errors += 1;
                             continue;
                         }
-                    }
+                    };
+                    lockfile.set_uri(input_name, p.hash.clone(), uri.clone());
+                    progress("Copying", dispatched, total, p.name.as_str());
+                    codegen_entries.push(CodegenEntry::asset(
+                        p.name.clone(),
+                        codegen::AssetRef::Uri(uri),
+                    ));
                 } else {
-                    String::new()
-                };
-                lockfile.set_uri(input_name, p.hash.clone(), uri.clone());
-                progress("Copying", dispatched, total, p.name.as_str());
-                codegen_entries.push(CodegenEntry::asset(
-                    p.name.clone(),
-                    codegen::AssetRef::Uri(uri),
-                ));
+                    dispatched += 1;
+                    let ext = p.path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    let rel = if ext.is_empty() {
+                        p.name.clone()
+                    } else {
+                        format!("{}.{}", p.name, ext)
+                    };
+                    let uri = if let Some(ss) = studio_sync {
+                        match ss.copy_asset(&rel, &p.bytes) {
+                            Ok(u) => {
+                                // Track expected file for Studio sync cleanup
+                                if let Some(ref mut set) = *studio_expected_files {
+                                    set.insert(rel.clone());
+                                }
+                                u
+                            }
+                            Err(e) => {
+                                clear_progress_line();
+                                log!(warn, "Studio copy failed for \"{}\": {}", p.name, e);
+                                errors += 1;
+                                continue;
+                            }
+                        }
+                    } else {
+                        String::new()
+                    };
+                    lockfile.set_uri(input_name, p.hash.clone(), uri.clone());
+                    progress("Copying", dispatched, total, p.name.as_str());
+                    codegen_entries.push(CodegenEntry::asset(
+                        p.name.clone(),
+                        codegen::AssetRef::Uri(uri),
+                    ));
+                }
             }
             Target::Debug => {
                 dispatched += 1;
@@ -255,7 +302,7 @@ pub async fn process_raw(
                 let p_description = p.description.clone();
                 let p_bytes = p.bytes.clone();
                 let p_kind = p.kind;
-                let asset_type_clone = asset_type.to_string();
+                let asset_type_override = asset_type.map(|s| s.to_string());
                 let semaphore_clone = semaphore.clone();
                 upload_tasks.spawn(async move {
                     let _permit = semaphore_clone.acquire_owned().await;
@@ -271,7 +318,7 @@ pub async fn process_raw(
                             description: p_description.clone(),
                             data: p_bytes.clone(),
                             kind: p_kind,
-                            asset_type_override: Some(asset_type_clone.clone()),
+                            asset_type_override: asset_type_override.clone(),
                             creator: creator_own,
                         })
                         .await
