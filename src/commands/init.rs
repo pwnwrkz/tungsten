@@ -1,5 +1,6 @@
 use crate::log;
-use anyhow::{Result, bail};
+use crate::utils::interactive::{self, DiscoveredFolder, FolderSelection};
+use anyhow::Result;
 use std::path::Path;
 
 #[allow(dead_code)]
@@ -43,38 +44,81 @@ const KNOWN_ASSET_DIRS: &[&str] = &[
 ];
 
 pub fn run() -> Result<()> {
+    // INITIAL CHECK: Ask to overwrite if config exists
     if Path::new("tungsten.toml").exists() {
-        bail!(
-            "tungsten.toml already exists in this directory\n\
-             Hint: Delete it first if you want to reinitialize"
-        );
+        let overwrite = interactive::confirm("tungsten.toml already exists. Overwrite?", false)?;
+        if !overwrite {
+            log!(info, "Init cancelled");
+            return Ok(());
+        }
     }
 
-    log!(section, "Scanning for asset directories");
+    log!(section, "TUNGSTEN INTERACTIVE INIT");
 
-    let discovered = discover_asset_dirs(".");
-    let config_content = build_config(&discovered);
+    // 1. Creator type
+    let creator_type = interactive::select("Creator type:", &["user", "group"], Some(0))?;
+    let creator_type = if creator_type == 0 { "user" } else { "group" };
+
+    // 2. Creator ID
+    let creator_id_str = interactive::input("Creator ID:")?;
+    let creator_id: u64 = creator_id_str
+        .trim()
+        .parse()
+        .map_err(|_| anyhow::anyhow!("Invalid creator ID: must be a number"))?;
+
+    // 3. Discover and select folders
+    log!(section, "SCANNING FOR ASSET DIRECTORIES");
+    let discovered = discover_asset_folders(".")?;
+
+    let selected_folders = if discovered.is_empty() {
+        log!(
+            warn,
+            "No asset directories detected — you can add them manually later"
+        );
+        Vec::new()
+    } else {
+        interactive::select_folders_with_types(
+            "Select asset folders to include (one by one):",
+            &discovered,
+        )?
+    };
+
+    // 4. Codegen style
+    let codegen_style = interactive::select("Codegen style:", &["flat", "nested"], Some(0))?;
+    let codegen_style = if codegen_style == 0 { "flat" } else { "nested" };
+
+    // 5. Strip extensions
+    let strip_extension = interactive::confirm("Strip file extensions from asset names?", true)?;
+
+    // 6. TypeScript declarations
+    let ts_declaration =
+        interactive::confirm("Generate TypeScript definition files (.d.ts)?", false)?;
+
+    // Build config
+    let config_content = build_interactive_config(
+        creator_type,
+        creator_id,
+        &selected_folders,
+        codegen_style,
+        strip_extension,
+        ts_declaration,
+    );
 
     std::fs::write("tungsten.toml", &config_content)
         .map_err(|e| anyhow::anyhow!("Failed to create tungsten.toml: {}", e))?;
 
-    if discovered.is_empty() {
-        log!(success, "Created tungsten.toml with a default structure");
-        log!(
-            info,
-            "No asset directories were detected — edit the [inputs] section manually"
-        );
+    log!(success, "Created tungsten.toml");
+    if !selected_folders.is_empty() {
+        log!(info, "Included {} input(s):", selected_folders.len());
+        for f in &selected_folders {
+            log!(info, "  {} (type: {})", f.display_name, f.asset_type);
+        }
     } else {
         log!(
-            success,
-            "Created tungsten.toml with {} input(s) detected",
-            discovered.len()
+            info,
+            "No inputs configured — edit tungsten.toml to add them"
         );
-        for dir in &discovered {
-            log!(info, "  Found: {}", dir.display_path);
-        }
     }
-
     log!(
         info,
         "See https://pwnwrkz.github.io/tungsten-docs/reference/configuration/ for configuration help"
@@ -83,50 +127,20 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-// Discovery
+// Discovery: Find generic parent folders and their type-specific subfolders
 
-struct DiscoveredDir {
-    display_path: String,
-    input_name: String,
-    counts: KindCounts,
-    has_subdirs: bool,
+fn discover_asset_folders(root: &str) -> Result<Vec<DiscoveredFolder>> {
+    let mut results = Vec::new();
+    scan_for_folders(Path::new(root), root, 0, 3, &mut results);
+    Ok(results)
 }
 
-/// Asset file counts per kind.
-#[derive(Debug, Clone, Copy, Default)]
-struct KindCounts {
-    images: usize,
-    audio: usize,
-    models: usize,
-}
-
-impl KindCounts {
-    fn is_empty(&self) -> bool {
-        self.images == 0 && self.audio == 0 && self.models == 0
-    }
-
-    /// True if more than one kind is present.
-    fn is_mixed(&self) -> bool {
-        [self.images > 0, self.audio > 0, self.models > 0]
-            .iter()
-            .filter(|&&b| b)
-            .count()
-            > 1
-    }
-}
-
-fn discover_asset_dirs(root: &str) -> Vec<DiscoveredDir> {
-    let mut results: Vec<DiscoveredDir> = Vec::new();
-    scan_dir(Path::new(root), root, 0, 3, &mut results);
-    results
-}
-
-fn scan_dir(
+fn scan_for_folders(
     path: &Path,
     root: &str,
     depth: usize,
     max_depth: usize,
-    results: &mut Vec<DiscoveredDir>,
+    results: &mut Vec<DiscoveredFolder>,
 ) {
     if depth > max_depth {
         return;
@@ -159,100 +173,167 @@ fn scan_dir(
             .to_string_lossy()
             .replace('\\', "/");
 
-        if results.iter().any(|r| rel.starts_with(&r.display_path)) {
-            continue;
-        }
+        // Check if this is a known generic folder (assets, content, etc.)
+        let dir_name_lower = dir_name.to_ascii_lowercase();
+        let is_type_specific = is_type_specific_dir(&dir_name_lower);
+        let is_generic = !is_type_specific && KNOWN_ASSET_DIRS.contains(&dir_name_lower.as_str());
 
-        let is_known = KNOWN_ASSET_DIRS.contains(&dir_name.to_ascii_lowercase().as_str());
+        if is_generic {
+            // Scan subdirectories for type-specific folders
+            let subdirs = find_type_subdirs(&entry_path);
+            for subdir in subdirs {
+                let sub_rel = subdir
+                    .strip_prefix(root)
+                    .unwrap_or(&subdir)
+                    .to_string_lossy()
+                    .replace('\\', "/");
 
-        // Count only files directly in this dir (not recursive) to determine
-        // whether the dir itself is single-kind or mixed. Mixing that comes
-        // purely from subdirs means we should recurse deeper instead.
-        let direct = count_direct_assets(&entry_path);
-        let (total_counts, has_subdirs) = scan_for_assets(&entry_path);
+                if results.iter().any(|r| r.path == sub_rel) {
+                    continue;
+                }
 
-        if !direct.is_empty() && direct.is_mixed() {
-            // This dir directly contains files of multiple kinds — emit split inputs.
-            results.push(DiscoveredDir {
-                display_path: rel.clone(),
-                input_name: make_input_name(&rel),
-                counts: total_counts,
-                has_subdirs,
-            });
-        } else if is_known || !total_counts.is_empty() {
-            if has_subdirs && total_counts.is_mixed() && direct.is_empty() {
-                // Mixing comes entirely from subdirs — recurse to discover them
-                // as separate single-kind inputs rather than lumping everything.
-                scan_dir(&entry_path, root, depth + 1, max_depth, results);
-            } else {
-                results.push(DiscoveredDir {
-                    display_path: rel.clone(),
-                    input_name: make_input_name(&rel),
-                    counts: total_counts,
-                    has_subdirs,
+                let counts = count_assets_in_dir(&subdir);
+                let suggested = suggest_type(&counts);
+
+                results.push(DiscoveredFolder {
+                    path: sub_rel.clone(),
+                    display_name: subdir
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(&sub_rel)
+                        .to_string(),
+                    suggested_type: suggested,
+                    asset_counts: counts,
                 });
             }
+
+            scan_for_folders(&entry_path, root, depth + 1, max_depth, results);
         } else {
-            scan_dir(&entry_path, root, depth + 1, max_depth, results);
+            // Direct type-specific folder
+            if results.iter().any(|r| rel.starts_with(&r.path)) {
+                continue;
+            }
+
+            let counts = count_assets_in_dir(&entry_path);
+            if counts.total() == 0 {
+                scan_for_folders(&entry_path, root, depth + 1, max_depth, results);
+                continue;
+            }
+
+            let suggested = suggest_type(&counts);
+
+            results.push(DiscoveredFolder {
+                path: rel.clone(),
+                display_name: dir_name,
+                suggested_type: suggested,
+                asset_counts: counts,
+            });
         }
     }
 }
 
-/// Count asset files *directly* inside `dir` — does not recurse into subdirs.
-fn count_direct_assets(dir: &Path) -> KindCounts {
-    let mut counts = KindCounts::default();
+fn find_type_subdirs(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut subdirs = Vec::new();
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
+            let path = entry.path();
+            if path.is_dir() {
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+
+                // Check if subdir name suggests a type
+                if is_type_specific_dir(&name) {
+                    subdirs.push(path);
+                }
+            }
+        }
+    }
+    subdirs
+}
+
+fn is_type_specific_dir(name: &str) -> bool {
+    matches!(
+        name,
+        "images"
+            | "image"
+            | "img"
+            | "icons"
+            | "icon"
+            | "sprites"
+            | "sprite"
+            | "textures"
+            | "texture"
+            | "models"
+            | "model"
+            | "meshes"
+            | "mesh"
+            | "sounds"
+            | "sound"
+            | "audio"
+            | "sfx"
+            | "music"
+            | "animations"
+            | "animation"
+    )
+}
+
+fn count_assets_in_dir(dir: &Path) -> interactive::AssetCounts {
+    let mut counts = interactive::AssetCounts::default();
+
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
                 continue;
             }
-            let ext = p
+            let ext = path
                 .extension()
                 .and_then(|e| e.to_str())
                 .unwrap_or("")
                 .to_ascii_lowercase();
+
             match ext.as_str() {
                 "png" | "jpg" | "jpeg" | "bmp" | "tga" | "svg" => counts.images += 1,
                 "mp3" | "ogg" | "flac" | "wav" => counts.audio += 1,
-                "fbx" | "gltf" | "glb" | "rbxm" | "rbxmx" => counts.models += 1,
-                _ => {}
+                "fbx" | "gltf" | "glb" | "rbxm" | "rbxmx" => {
+                    // Check if rbxm/rbxmx is animation
+                    if ext == "rbxm" || ext == "rbxmx" {
+                        if let Ok(true) = crate::core::assets::asset::is_animation_file(&path) {
+                            counts.animations += 1;
+                        } else {
+                            counts.models += 1;
+                        }
+                    } else {
+                        counts.models += 1;
+                    }
+                }
+                _ => counts.other += 1,
             }
         }
     }
     counts
 }
 
-fn scan_for_assets(dir: &Path) -> (KindCounts, bool) {
-    let mut counts = KindCounts::default();
-    let mut has_subdirs = false;
-
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                has_subdirs = true;
-                let (sub, _) = scan_for_assets(&p);
-                counts.images += sub.images;
-                counts.audio += sub.audio;
-                counts.models += sub.models;
-                continue;
-            }
-            let ext = p
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            match ext.as_str() {
-                "png" | "jpg" | "jpeg" | "bmp" | "tga" | "svg" => counts.images += 1,
-                "mp3" | "ogg" | "flac" | "wav" => counts.audio += 1,
-                "fbx" | "gltf" | "glb" | "rbxm" | "rbxmx" => counts.models += 1,
-                _ => {}
-            }
-        }
+fn suggest_type(counts: &interactive::AssetCounts) -> String {
+    if counts.images > 0
+        && counts.images >= counts.audio
+        && counts.images >= counts.models
+        && counts.images >= counts.animations
+    {
+        "image"
+    } else if counts.audio > 0 {
+        "audio"
+    } else if counts.animations > 0 {
+        "animation"
+    } else if counts.models > 0 {
+        "model"
+    } else {
+        "auto"
     }
-
-    (counts, has_subdirs)
+    .to_string()
 }
 
 fn is_noise_dir(name: &str) -> bool {
@@ -275,275 +356,63 @@ fn is_noise_dir(name: &str) -> bool {
     )
 }
 
-fn make_input_name(rel_path: &str) -> String {
-    rel_path
-        .split('/')
-        .next_back()
-        .unwrap_or(rel_path)
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-        .collect::<String>()
-        .trim_matches('_')
-        .to_string()
-}
-
 // Config builder
 
-/// A single `[inputs.name]` block to emit.
-struct InputBlock {
-    name: String,
-    glob: String,
-    output_path: String,
-    /// Whether to emit `packable = false` (images only).
-    packable: bool,
-}
-
-/// Expand one `DiscoveredDir` into one or more `InputBlock`s.
-///
-/// Pure dirs (one kind only) -> one block.
-/// Mixed dirs -> one block per present kind, suffixed `_images` / `_audio` / `_models`.
-///
-/// Globs use `*` (or `**/*` for dirs with subdirs). No brace patterns, since
-/// the `glob` crate used by Tungsten does not expand them. Tungsten's
-/// `kind_from_ext` filter automatically discards non-matching files.
-fn dir_to_inputs(dir: &DiscoveredDir) -> Vec<InputBlock> {
-    let wc = if dir.has_subdirs { "**/" } else { "" };
-    let base = &dir.display_path;
-    let name = &dir.input_name;
-
-    if !dir.counts.is_mixed() {
-        // Single-kind dir. Determine packable flag from which kind dominates.
-        let is_image_dir =
-            dir.counts.images >= dir.counts.audio && dir.counts.images >= dir.counts.models;
-        return vec![InputBlock {
-            name: name.clone(),
-            glob: format!("{}/{}*", base, wc),
-            output_path: format!("src/{}.luau", name),
-            packable: is_image_dir,
-        }];
-    }
-
-    // Mixed dir: split into one block per kind present.
-    let mut blocks = Vec::new();
-
-    if dir.counts.images > 0 {
-        blocks.push(InputBlock {
-            name: format!("{}_images", name),
-            glob: format!("{}/{}*", base, wc),
-            output_path: format!("src/{}_images.luau", name),
-            packable: true,
-        });
-    }
-    if dir.counts.audio > 0 {
-        blocks.push(InputBlock {
-            name: format!("{}_audio", name),
-            glob: format!("{}/{}*", base, wc),
-            output_path: format!("src/{}_audio.luau", name),
-            packable: false,
-        });
-    }
-    if dir.counts.models > 0 {
-        blocks.push(InputBlock {
-            name: format!("{}_models", name),
-            glob: format!("{}/{}*", base, wc),
-            output_path: format!("src/{}_models.luau", name),
-            packable: false,
-        });
-    }
-
-    blocks
-}
-
-fn build_config(dirs: &[DiscoveredDir]) -> String {
+fn build_interactive_config(
+    creator_type: &str,
+    creator_id: u64,
+    folders: &[FolderSelection],
+    codegen_style: &str,
+    strip_extension: bool,
+    ts_declaration: bool,
+) -> String {
     let mut out = String::new();
 
     out.push_str("[creator]\n");
-    out.push_str("type = \"user\"\n");
-    out.push_str("id = 0\n");
-    out.push('\n');
-    out.push_str("[codegen]\n");
-    out.push_str("style = \"flat\"\n");
-    out.push_str("strip_extension = true\n");
+    out.push_str(&format!("type = \"{}\"\n", creator_type));
+    out.push_str(&format!("id = {}\n", creator_id));
     out.push('\n');
 
-    if dirs.is_empty() {
+    out.push_str("[codegen]\n");
+    out.push_str(&format!("style = \"{}\"\n", codegen_style));
+    out.push_str(&format!("strip_extension = {}\n", strip_extension));
+    out.push_str(&format!("ts_declaration = {}\n", ts_declaration));
+    out.push('\n');
+
+    if folders.is_empty() {
         out.push_str("[inputs.assets]\n");
         out.push_str("path = \"assets/**/*\"\n");
         out.push_str("output_path = \"src/assets.luau\"\n");
         out.push_str("packable = false\n");
+        // type omitted = auto
         return out;
     }
 
-    for dir in dirs {
-        for block in dir_to_inputs(dir) {
-            out.push_str(&format!("[inputs.{}]\n", block.name));
-            out.push_str(&format!("path = \"{}\"\n", block.glob));
-            out.push_str(&format!("output_path = \"{}\"\n", block.output_path));
-            if block.packable {
-                out.push_str("packable = true\n");
-            }
-            out.push('\n');
+    for (i, folder) in folders.iter().enumerate() {
+        let name = if folder.display_name.is_empty() {
+            format!("input_{}", i + 1)
+        } else {
+            folder.display_name.clone()
+        };
+
+        // Sanitize name
+        let name = name
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect::<String>()
+            .trim_matches('_')
+            .to_string();
+
+        out.push_str(&format!("[inputs.{}]\n", name));
+        out.push_str(&format!("path = \"{}/**/*\"\n", folder.path));
+        out.push_str(&format!("output_path = \"src/{}.luau\"\n", name));
+
+        if folder.asset_type != "auto" {
+            out.push_str(&format!("type = \"{}\"\n", folder.asset_type));
         }
+
+        out.push('\n');
     }
 
     out
-}
-
-// Tests
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_make_input_name() {
-        assert_eq!(make_input_name("assets/icons"), "icons");
-        assert_eq!(make_input_name("src/assets"), "assets");
-        assert_eq!(make_input_name("my-images"), "my_images");
-        assert_eq!(make_input_name("assets"), "assets");
-    }
-
-    #[test]
-    fn test_is_noise_dir() {
-        assert!(is_noise_dir("node_modules"));
-        assert!(is_noise_dir("target"));
-        assert!(is_noise_dir(".git"));
-        assert!(!is_noise_dir("assets"));
-        assert!(!is_noise_dir("icons"));
-    }
-
-    #[test]
-    fn test_build_config_empty() {
-        let cfg = build_config(&[]);
-        assert!(cfg.contains("[creator]"));
-        assert!(cfg.contains("[inputs.assets]"));
-        assert!(cfg.contains("path = \"assets/**/*\""));
-        assert!(!cfg.contains('{'), "no brace patterns in fallback");
-    }
-
-    #[test]
-    fn test_no_brace_patterns() {
-        let dirs = vec![
-            DiscoveredDir {
-                display_path: "assets/icons".into(),
-                input_name: "icons".into(),
-                counts: KindCounts {
-                    images: 5,
-                    audio: 0,
-                    models: 0,
-                },
-                has_subdirs: true,
-            },
-            DiscoveredDir {
-                display_path: "assets/sounds".into(),
-                input_name: "sounds".into(),
-                counts: KindCounts {
-                    images: 0,
-                    audio: 3,
-                    models: 0,
-                },
-                has_subdirs: false,
-            },
-            DiscoveredDir {
-                display_path: "assets/mixed".into(),
-                input_name: "mixed".into(),
-                counts: KindCounts {
-                    images: 2,
-                    audio: 2,
-                    models: 1,
-                },
-                has_subdirs: false,
-            },
-        ];
-        let cfg = build_config(&dirs);
-        assert!(
-            !cfg.contains('{'),
-            "brace patterns must not appear in generated config"
-        );
-        assert!(cfg.contains("[inputs.icons]"));
-        assert!(cfg.contains("[inputs.sounds]"));
-        // Direct-mixed dir still splits
-        assert!(cfg.contains("[inputs.mixed_images]"));
-        assert!(cfg.contains("[inputs.mixed_audio]"));
-        assert!(cfg.contains("[inputs.mixed_models]"));
-    }
-
-    /// Simulates a test structure:
-    ///
-    /// assets/
-    /// - audio/some_audio.mp3
-    /// - images/some_image.png
-    ///
-    /// `assets` itself has no direct files — mixing comes from subdirs only.
-    /// Expected: `audio` and `images` discovered as separate inputs, NOT `assets_images` + `assets_audio`.
-    #[test]
-    fn test_subdir_mixed_recurses_into_children() {
-        // Pretend scan_dir ran and found the children directly.
-        // We test build_config with what scan_dir *should* produce.
-        let dirs = vec![
-            DiscoveredDir {
-                display_path: "assets/images".into(),
-                input_name: "images".into(),
-                counts: KindCounts {
-                    images: 1,
-                    audio: 0,
-                    models: 0,
-                },
-                has_subdirs: false,
-            },
-            DiscoveredDir {
-                display_path: "assets/audio".into(),
-                input_name: "audio".into(),
-                counts: KindCounts {
-                    images: 0,
-                    audio: 1,
-                    models: 0,
-                },
-                has_subdirs: false,
-            },
-        ];
-        let cfg = build_config(&dirs);
-        assert!(cfg.contains("[inputs.images]"));
-        assert!(cfg.contains("[inputs.audio]"));
-        assert!(
-            !cfg.contains("[inputs.assets_images]"),
-            "should not lump into parent"
-        );
-        assert!(
-            !cfg.contains("[inputs.assets_audio]"),
-            "should not lump into parent"
-        );
-    }
-
-    #[test]
-    fn test_single_kind_dirs() {
-        let dirs = vec![
-            DiscoveredDir {
-                display_path: "assets/icons".into(),
-                input_name: "icons".into(),
-                counts: KindCounts {
-                    images: 4,
-                    audio: 0,
-                    models: 0,
-                },
-                has_subdirs: true,
-            },
-            DiscoveredDir {
-                display_path: "assets/sounds".into(),
-                input_name: "sounds".into(),
-                counts: KindCounts {
-                    images: 0,
-                    audio: 2,
-                    models: 0,
-                },
-                has_subdirs: false,
-            },
-        ];
-        let cfg = build_config(&dirs);
-        assert!(cfg.contains("[inputs.icons]"));
-        assert!(cfg.contains("[inputs.sounds]"));
-        assert!(cfg.contains("packable = true")); // icons is an image dir
-        assert!(cfg.contains("**/")); // icons has subdirs
-        assert!(!cfg.contains("sounds/**/")); // sounds has no subdirs
-    }
 }
