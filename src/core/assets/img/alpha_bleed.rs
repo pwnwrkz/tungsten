@@ -6,101 +6,15 @@
 //! into each transparent pixel it reaches. Alpha stays 0 — only RGB is written.
 //!
 //! Optimizations:
-//! - Bit-packed `Vec<u32>` instead of `BitVec` for better cache locality
-//! - Single `Vec<u32>` queue with head/tail indices instead of `VecDeque`
+//! - `bit_vec::BitVec` for compact boolean storage
+//! - `VecDeque` for wave queues
 //! - 4-neighbor fast path, 8-neighbor fallback for correctness
-//! - Pre-allocated buffers reused across waves
-//! - Raw pixel slice access to skip bounds checks in hot loop
 
 #[cfg(test)]
 use image::Rgba;
 use image::RgbaImage;
-
-/// Bit-packed boolean array using `Vec<u32>` for cache efficiency.
-#[derive(Clone)]
-struct BitPacked {
-    data: Vec<u32>,
-}
-
-impl BitPacked {
-    #[inline]
-    fn new(size: usize, value: bool) -> Self {
-        let word_count = size.div_ceil(32);
-        let fill = if value { u32::MAX } else { 0 };
-        Self {
-            data: vec![fill; word_count],
-        }
-    }
-
-    #[inline]
-    fn get(&self, index: usize) -> bool {
-        let word = index >> 5;
-        let bit = index & 31;
-        (self.data[word] >> bit) & 1 != 0
-    }
-
-    #[inline]
-    fn set(&mut self, index: usize, value: bool) {
-        let word = index >> 5;
-        let bit = index & 31;
-        if value {
-            self.data[word] |= 1 << bit;
-        } else {
-            self.data[word] &= !(1 << bit);
-        }
-    }
-}
-
-/// Queue using a single `Vec<u32>` with head/tail indices for O(1) push/pop.
-struct RingQueue {
-    data: Vec<u32>,
-    head: usize,
-    tail: usize,
-}
-
-impl RingQueue {
-    #[inline]
-    fn with_capacity(cap: usize) -> Self {
-        Self {
-            data: vec![0; cap],
-            head: 0,
-            tail: 0,
-        }
-    }
-
-    #[inline]
-    fn push(&mut self, value: u32) {
-        self.data[self.tail] = value;
-        self.tail = (self.tail + 1) % self.data.len();
-    }
-
-    #[inline]
-    fn pop(&mut self) -> Option<u32> {
-        if self.head == self.tail {
-            return None;
-        }
-        let value = self.data[self.head];
-        self.head = (self.head + 1) % self.data.len();
-        Some(value)
-    }
-
-    #[inline]
-    fn is_empty(&self) -> bool {
-        self.head == self.tail
-    }
-
-    #[inline]
-    fn clear(&mut self) {
-        self.head = 0;
-        self.tail = 0;
-    }
-
-    #[inline]
-    #[allow(dead_code)]
-    fn len(&self) -> usize {
-        (self.tail + self.data.len() - self.head) % self.data.len()
-    }
-}
+use bit_vec::BitVec;
+use std::collections::VecDeque;
 
 /// 4-neighbor offsets (cardinal directions) — checked first for speed.
 const OFFSETS_4: [(i32, i32); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
@@ -126,13 +40,13 @@ pub fn alpha_bleed(img: &mut RgbaImage) {
     let pixel_count = (width * height) as usize;
     let max_queue_size = pixel_count.max(256);
 
-    // Bit-packed arrays for O(1) access with minimal memory footprint
-    let mut can_be_sampled = BitPacked::new(pixel_count, false);
-    let mut visited = BitPacked::new(pixel_count, false);
+    // BitVec for compact boolean storage
+    let mut can_be_sampled = BitVec::from_elem(pixel_count, false);
+    let mut visited = BitVec::from_elem(pixel_count, false);
 
     // Pre-allocated queues (double-buffered)
-    let mut current_wave = RingQueue::with_capacity(max_queue_size);
-    let mut next_wave = RingQueue::with_capacity(max_queue_size);
+    let mut current_wave = VecDeque::with_capacity(max_queue_size);
+    let mut next_wave = VecDeque::with_capacity(max_queue_size);
 
     let pixels = img.as_raw();
 
@@ -149,7 +63,7 @@ pub fn alpha_bleed(img: &mut RgbaImage) {
     for y in 0..height {
         for x in 0..width {
             let index = (x + y * width) as usize;
-            if can_be_sampled.get(index) {
+            if can_be_sampled.get(index).unwrap_or(false) {
                 continue;
             }
             let mut borders_opaque = false;
@@ -158,7 +72,7 @@ pub fn alpha_bleed(img: &mut RgbaImage) {
                 let ny = y as i32 + dy;
                 if nx >= 0 && ny >= 0 && nx < width as i32 && ny < height as i32 {
                     let nidx = (nx as u32 + ny as u32 * width) as usize;
-                    if can_be_sampled.get(nidx) {
+                    if can_be_sampled.get(nidx).unwrap_or(false) {
                         borders_opaque = true;
                         break;
                     }
@@ -170,7 +84,7 @@ pub fn alpha_bleed(img: &mut RgbaImage) {
                     let ny = y as i32 + dy;
                     if nx >= 0 && ny >= 0 && nx < width as i32 && ny < height as i32 {
                         let nidx = (nx as u32 + ny as u32 * width) as usize;
-                        if can_be_sampled.get(nidx) {
+                        if can_be_sampled.get(nidx).unwrap_or(false) {
                             borders_opaque = true;
                             break;
                         }
@@ -179,7 +93,7 @@ pub fn alpha_bleed(img: &mut RgbaImage) {
             }
             if borders_opaque {
                 visited.set(index, true);
-                current_wave.push(index as u32);
+                current_wave.push_back(index as u32);
             }
         }
     }
@@ -188,7 +102,7 @@ pub fn alpha_bleed(img: &mut RgbaImage) {
     let pixels = img.as_mut();
 
     while !current_wave.is_empty() {
-        while let Some(flat_index) = current_wave.pop() {
+        while let Some(flat_index) = current_wave.pop_front() {
             let index = flat_index as usize;
             let x = flat_index % width;
             let y = flat_index / width;
@@ -206,15 +120,15 @@ pub fn alpha_bleed(img: &mut RgbaImage) {
                     continue;
                 }
                 let nidx = (nx as u32 + ny as u32 * width) as usize;
-                if can_be_sampled.get(nidx) {
+                if can_be_sampled.get(nidx).unwrap_or(false) {
                     let base = nidx * 4;
                     red_sum += pixels[base] as u32;
                     green_sum += pixels[base + 1] as u32;
                     blue_sum += pixels[base + 2] as u32;
                     sample_count += 1;
-                } else if !visited.get(nidx) {
+                } else if !visited.get(nidx).unwrap_or(false) {
                     visited.set(nidx, true);
-                    next_wave.push(nidx as u32);
+                    next_wave.push_back(nidx as u32);
                 }
             }
 
@@ -227,15 +141,15 @@ pub fn alpha_bleed(img: &mut RgbaImage) {
                         continue;
                     }
                     let nidx = (nx as u32 + ny as u32 * width) as usize;
-                    if can_be_sampled.get(nidx) {
+                    if can_be_sampled.get(nidx).unwrap_or(false) {
                         let base = nidx * 4;
                         red_sum += pixels[base] as u32;
                         green_sum += pixels[base + 1] as u32;
                         blue_sum += pixels[base + 2] as u32;
                         sample_count += 1;
-                    } else if !visited.get(nidx) {
+                    } else if !visited.get(nidx).unwrap_or(false) {
                         visited.set(nidx, true);
-                        next_wave.push(nidx as u32);
+                        next_wave.push_back(nidx as u32);
                     }
                 }
             }
@@ -250,7 +164,7 @@ pub fn alpha_bleed(img: &mut RgbaImage) {
         }
 
         // Mark current wave as samplable for next iteration
-        while let Some(flat_index) = current_wave.pop() {
+        while let Some(flat_index) = current_wave.pop_front() {
             can_be_sampled.set(flat_index as usize, true);
         }
 
