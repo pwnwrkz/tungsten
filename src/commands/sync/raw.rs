@@ -161,12 +161,7 @@ pub async fn process_raw(
 ) -> u32 {
     // Seed web assets into codegen entries first
     let mut codegen_entries: Vec<CodegenEntry> = Vec::new();
-    seed_web_assets(
-        web_assets,
-        base_path,
-        strip_extension,
-        &mut codegen_entries,
-    );
+    seed_web_assets(web_assets, base_path, strip_extension, &mut codegen_entries);
 
     // Process files in parallel
     let pending_results: Vec<Result<RawPending, ProcessingError>> = paths

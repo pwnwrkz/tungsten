@@ -1,6 +1,6 @@
-use relative_path::RelativePathBuf;
 use crate::core::assets::asset::WebAsset;
 use crate::core::postsync::codegen::CodegenEntry;
+use relative_path::RelativePathBuf;
 
 /// Seeds web assets (pre-existing Roblox assets mapped in config) into codegen entries.
 /// This creates AssetRef::Id entries for assets that don't need uploading.
@@ -43,7 +43,12 @@ pub fn write_codegen(
         output_path,
         ts_declaration,
     ) {
-        crate::log!(warn, "Failed to write codegen for \"{}\": {}", input_name, e);
+        crate::log!(
+            warn,
+            "Failed to write codegen for \"{}\": {}",
+            input_name,
+            e
+        );
         *errors += 1;
     }
 }

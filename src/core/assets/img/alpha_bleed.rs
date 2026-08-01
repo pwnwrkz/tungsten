@@ -10,10 +10,10 @@
 //! - `VecDeque` for wave queues
 //! - 4-neighbor fast path, 8-neighbor fallback for correctness
 
+use bit_vec::BitVec;
 #[cfg(test)]
 use image::Rgba;
 use image::RgbaImage;
-use bit_vec::BitVec;
 use std::collections::VecDeque;
 
 /// 4-neighbor offsets (cardinal directions) — checked first for speed.

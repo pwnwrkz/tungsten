@@ -4,9 +4,9 @@
 //! temporary file, compressed to a second temp file, then read back.
 //! Both temp files are cleaned up automatically on drop.
 
+use crate::log;
 use anyhow::{Context, Result};
 use caesium::parameters::CSParameters;
-use crate::log;
 
 /// Quality settings per format. All fields are optional — `None` keeps the
 /// caesium default for that format.
