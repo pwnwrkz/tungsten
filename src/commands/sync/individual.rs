@@ -1,9 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use rayon::prelude::*;
+use relative_path::RelativePathBuf;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
@@ -11,9 +12,9 @@ use crate::api::sync::debug::DebugSync;
 use crate::api::sync::roblox::Creator;
 use crate::api::sync::studio::StudioSync;
 use crate::api::upload::{RobloxClient, UploadParams};
-use crate::core::assets::asset::{AssetKind, AssetMeta, ImageFormat};
+use crate::core::assets::asset::{AssetKind, AssetMeta, ImageFormat, WebAsset};
 use crate::core::assets::img::alpha_bleed::alpha_bleed;
-use crate::core::assets::img::compress::CompressOptions;
+use crate::core::assets::img::compress::{CompressOptions, maybe_compress_png};
 use crate::core::postsync::codegen::{self, CodegenEntry};
 use crate::core::postsync::lockfile::{Lockfile, hash_image};
 use crate::log;
@@ -41,22 +42,6 @@ struct ProcessingError {
     error: anyhow::Error,
 }
 
-/// Optionally compress PNG bytes before upload.
-#[inline]
-fn maybe_compress_png(bytes: Vec<u8>, compress_options: Option<&CompressOptions>) -> Vec<u8> {
-    let Some(opts) = compress_options else {
-        return bytes;
-    };
-    match crate::core::assets::img::compress::compress_image(&bytes, "png", opts) {
-        Ok(compressed) => compressed,
-        Err(e) => {
-            clear_progress_line();
-            log!(warn, "Compression failed, using original: {}", e);
-            bytes
-        }
-    }
-}
-
 /// Process a single image for individual asset processing (synchronous version for parallel processing)
 #[inline]
 fn process_single_image_sync(
@@ -66,7 +51,7 @@ fn process_single_image_sync(
     compress_options: Option<&CompressOptions>,
     bleed: bool,
     _creator: &Creator,
-    asset_type: &str,
+    asset_type: Option<&str>,
 ) -> Result<Pending, ProcessingError> {
     // Find the actual file path for this image
     let path = paths
@@ -107,7 +92,7 @@ fn process_single_image_sync(
         kind,
         display_name,
         description,
-        asset_type: Some(asset_type.to_string()),
+        asset_type: asset_type.map(|s| s.to_string()),
     })
 }
 
@@ -127,17 +112,22 @@ pub async fn process_individual(
     target: Target,
     dry_run: bool,
     creator: &Creator,
-    asset_type: &str,
+    asset_type: Option<&str>,
     client: &Option<Arc<RobloxClient>>,
     studio_sync: &Option<Arc<StudioSync>>,
     debug_sync: &Option<Arc<DebugSync>>,
     lockfile: &mut Lockfile,
     studio_expected_files: &mut Option<&mut HashSet<String>>,
     max_concurrent_uploads: usize,
+    web_assets: &HashMap<RelativePathBuf, WebAsset>,
 ) -> u32 {
     let mut errors: u32 = 0;
     let total = images.len();
     let _ = svg_scale;
+
+    // Seed web assets into codegen entries first
+    let mut codegen_entries: Vec<CodegenEntry> = Vec::new();
+    seed_web_assets(web_assets, base_path, strip_extension, &mut codegen_entries);
 
     let (dpi_groups, plain_images) = group_dpi_variants(images);
 
@@ -169,8 +159,6 @@ pub async fn process_individual(
             }
         }
     }
-
-    let mut codegen_entries: Vec<CodegenEntry> = Vec::with_capacity(total);
 
     // Configure upload concurrency limit from config
     let semaphore = Arc::new(Semaphore::new(max_concurrent_uploads));
@@ -311,7 +299,6 @@ pub async fn process_individual(
                 Err(e) => {
                     clear_progress_line();
                     log!(warn, "Failed to encode {}@{}x: {}", base_name, scale, e);
-                    // Can't easily increment errors here, track via return value
                     return None;
                 }
             };
@@ -378,7 +365,7 @@ pub async fn process_individual(
                     let bytes_clone = task.bytes.clone();
                     let scale = task.scale;
                     let creator_clone = creator.clone();
-                    let asset_type_clone = asset_type.to_string();
+                    let asset_type_override = asset_type.map(|s| s.to_string());
                     let semaphore_clone = semaphore.clone();
                     dpi_upload_tasks.spawn(async move {
                         let _permit = semaphore_clone.acquire_owned().await;
@@ -389,7 +376,7 @@ pub async fn process_individual(
                                 description: "Uploaded by Tungsten".to_string(),
                                 data: bytes_clone,
                                 kind: AssetKind::Image(ImageFormat::Png),
-                                asset_type_override: Some(asset_type_clone),
+                                asset_type_override,
                                 creator: creator_clone,
                             })
                             .await
@@ -518,4 +505,27 @@ pub async fn process_individual(
         &mut errors,
     );
     errors
+}
+
+/// Seeds web assets (pre-existing Roblox assets mapped in config) into codegen entries.
+/// This creates AssetRef::Id entries for assets that don't need uploading.
+fn seed_web_assets(
+    web_assets: &HashMap<RelativePathBuf, WebAsset>,
+    base_path: &str,
+    strip_extension: bool,
+    codegen_entries: &mut Vec<CodegenEntry>,
+) {
+    for (rel_path, web_asset) in web_assets {
+        let name = rel_path.to_string().replace('\\', "/");
+        let name = name
+            .strip_prefix(base_path.trim_end_matches('/'))
+            .unwrap_or(&name);
+        let name = name.trim_start_matches('/');
+        let key = if strip_extension {
+            name.trim_end_matches('.').to_string()
+        } else {
+            name.to_string()
+        };
+        codegen_entries.push(CodegenEntry::asset_id(key, web_asset.id));
+    }
 }
