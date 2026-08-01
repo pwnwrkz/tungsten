@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
+use rbx_install::RobloxStudio;
 use reqwest;
-use roblox_install::RobloxStudio;
 use std::path::{Path, PathBuf};
 
 /// A handle to the Roblox Studio content folder for this project.
