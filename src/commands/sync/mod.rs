@@ -54,6 +54,16 @@ impl Target {
     }
 }
 
+/// Resolves the asset type override for upload.
+/// Returns `None` to infer from file kind, `Some(type)` for explicit override.
+fn resolve_asset_type_override(asset_type: Option<&str>) -> Option<&str> {
+    match asset_type {
+        Some(s) if s.eq_ignore_ascii_case("auto") => None,
+        Some(s) => Some(s),
+        None => None,
+    }
+}
+
 // Entry point
 
 pub async fn run(
@@ -153,7 +163,7 @@ pub async fn run(
     let max_concurrent_uploads = config.max_concurrent_uploads;
 
     for (input_name, input) in &config.inputs {
-        log!(section, "Syncing \"{}\"", input_name);
+        log!(section, "SYNCING \"{}\"", input_name);
 
         let paths = match collect_paths(&input.path) {
             Ok(p) if p.is_empty() => {
@@ -189,6 +199,7 @@ pub async fn run(
 
         // Non-image assets (audio, models)
         if !other_paths.is_empty() {
+            let asset_type_override = resolve_asset_type_override(input.asset_type.as_deref());
             let errs = process_raw(
                 input_name,
                 other_paths,
@@ -201,13 +212,14 @@ pub async fn run(
                 target,
                 dry_run,
                 &creator,
-                &input.asset_type,
+                asset_type_override,
                 &client,
                 &studio_sync,
                 &debug_sync,
                 &mut lockfile,
                 &mut studio_expected_files,
                 max_concurrent_uploads,
+                &input.web,
             )
             .await;
             total_errors += errs;
@@ -291,6 +303,7 @@ pub async fn run(
 
             let errs = if input.packable.unwrap_or(false) {
                 let sheet_meta = load_input_meta(&base_path);
+                let asset_type_override = resolve_asset_type_override(input.asset_type.as_deref());
                 process_packed(
                     input_name,
                     &sheet_meta,
@@ -304,21 +317,24 @@ pub async fn run(
                     target,
                     dry_run,
                     &creator,
-                    &input.asset_type,
+                    asset_type_override,
                     &client,
                     &studio_sync,
                     &debug_sync,
                     &mut lockfile,
                     &mut studio_expected_files,
                     max_concurrent_uploads,
+                    &input.web,
+                    &base_path,
                 )
                 .await
             } else {
+                let asset_type_override = resolve_asset_type_override(input.asset_type.as_deref());
                 process_individual(
                     input_name,
                     images,
                     image_paths,
-                    0.0, // svg_scale unused; per‑file scale handled above
+                    0.0, // svg_scale unused; per-file scale handled above
                     &base_path,
                     &input.output_path,
                     &codegen_style,
@@ -329,13 +345,14 @@ pub async fn run(
                     target,
                     dry_run,
                     &creator,
-                    &input.asset_type,
+                    asset_type_override,
                     &client,
                     &studio_sync,
                     &debug_sync,
                     &mut lockfile,
                     &mut studio_expected_files,
                     max_concurrent_uploads,
+                    &input.web,
                 )
                 .await
             };
@@ -401,7 +418,7 @@ pub async fn run(
         }
     }
 
-    log!(section, "Done");
+    log!(section, "SUMMARY");
     if total_errors > 0 {
         log!(
             warn,
