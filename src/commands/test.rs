@@ -34,7 +34,7 @@ pub async fn run(config: Config, api_key: Option<String>) -> Result<()> {
     let mut warnings: u32 = 0;
     let mut passed: u32 = 0;
 
-    log!(section, "Testing Tungsten configuration");
+    log!(section, "TESTING CONFIGURATION");
 
     // Creator
     match config.creator.creator_type.as_str() {
@@ -94,7 +94,7 @@ pub async fn run(config: Config, api_key: Option<String>) -> Result<()> {
 
     // Upload smoke test
     if let Some(key) = key {
-        log!(section, "Upload smoke test");
+        log!(section, "UPLOADING SMOKE TEST");
 
         let creator = match make_creator(&config) {
             Ok(c) => c,
@@ -143,7 +143,7 @@ pub async fn run(config: Config, api_key: Option<String>) -> Result<()> {
     }
 
     // Summary
-    log!(section, "Summary");
+    log!(section, "SUMMARY");
     finalize(passed, warnings);
 
     Ok(())

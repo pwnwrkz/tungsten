@@ -19,7 +19,7 @@ pub async fn run(
     target: Target,
     is_syncing: Arc<AtomicBool>,
 ) -> Result<()> {
-    log!(section, "Tungsten Watch");
+    log!(section, "WATCH MODE");
     log!(info, "Watching for changes (target: {:?})...", target);
 
     let watch_dirs: Vec<String> = config
@@ -49,11 +49,7 @@ pub async fn run(
                 .with_context(|| format!("Failed to watch directory \"{}\"", dir))?;
             log!(info, "Watching \"{}\"", dir);
         } else {
-            log!(
-                warn,
-                "Watch directory \"{}\" does not exist — skipping",
-                dir
-            );
+            log!(warn, "Watch directory \"{}\" does not exist. Skipping", dir);
         }
     }
 
@@ -94,7 +90,7 @@ pub async fn run(
         {
             pending_change = false;
             last_event = None;
-            log!(section, "Change detected — re-syncing");
+            log!(section, "RE-SYNCING");
             let fresh_config = match config::load("tungsten.toml") {
                 Ok(c) => c,
                 Err(e) => {
