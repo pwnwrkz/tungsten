@@ -1,16 +1,17 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use rayon::prelude::*;
+use relative_path::RelativePathBuf;
 
 use crate::api::sync::debug::DebugSync;
 use crate::api::sync::roblox::Creator;
 use crate::api::sync::studio::StudioSync;
 use crate::api::upload::{RobloxClient, UploadParams};
-use crate::core::assets::asset::{AssetKind, AssetMeta, ImageFormat};
+use crate::core::assets::asset::{AssetKind, AssetMeta, ImageFormat, WebAsset};
 use crate::core::assets::img::alpha_bleed::alpha_bleed;
-use crate::core::assets::img::compress::CompressOptions;
+use crate::core::assets::img::compress::{CompressOptions, maybe_compress_png};
 use crate::core::assets::img::pack;
 use crate::core::postsync::codegen::{self, CodegenEntry};
 use crate::core::postsync::lockfile::{Lockfile, hash_image};
@@ -21,21 +22,6 @@ use image::RgbaImage;
 use super::Target;
 use super::codegen_write::write_codegen;
 use super::encode::{encode_png, group_dpi_variants};
-
-/// Optionally compress PNG bytes before upload.
-fn maybe_compress_png(bytes: Vec<u8>, compress_options: Option<&CompressOptions>) -> Vec<u8> {
-    let Some(opts) = compress_options else {
-        return bytes;
-    };
-    match crate::core::assets::img::compress::compress_image(&bytes, "png", opts) {
-        Ok(compressed) => compressed,
-        Err(e) => {
-            clear_progress_line();
-            log!(warn, "Compression failed, using original: {}", e);
-            bytes
-        }
-    }
-}
 
 #[allow(clippy::too_many_arguments)]
 pub async fn process_packed(
@@ -51,13 +37,15 @@ pub async fn process_packed(
     target: Target,
     dry_run: bool,
     creator: &Creator,
-    asset_type: &str,
+    asset_type: Option<&str>,
     client: &Option<Arc<RobloxClient>>,
     studio_sync: &Option<Arc<StudioSync>>,
     debug_sync: &Option<Arc<DebugSync>>,
     lockfile: &mut Lockfile,
     studio_expected_files: &mut Option<&mut HashSet<String>>,
     _max_concurrent_uploads: usize,
+    web_assets: &HashMap<RelativePathBuf, WebAsset>,
+    base_path: &str,
 ) -> u32 {
     let mut errors: u32 = 0;
 
@@ -74,6 +62,24 @@ pub async fn process_packed(
 
     let (dpi_groups, plain_images) = group_dpi_variants(images);
     let mut codegen_entries: Vec<CodegenEntry> = Vec::new();
+
+    // Seed web assets into codegen entries
+    for (rel_path, web_asset) in web_assets {
+        let name = rel_path.to_string().replace('\\', "/");
+        let name = name
+            .strip_prefix(base_path.trim_end_matches('/'))
+            .unwrap_or(&name);
+        let name = name.trim_start_matches('/');
+        let key = if strip_extension {
+            name.trim_end_matches('.').to_string()
+        } else {
+            name.to_string()
+        };
+        codegen_entries.push(CodegenEntry::asset(
+            key,
+            codegen::AssetRef::Id(web_asset.id),
+        ));
+    }
 
     // DPI groups - skip packing and uploading, create codegen entries with placeholder IDs
     // These go on a waitlist for manual upload later
@@ -233,7 +239,7 @@ pub async fn upload_or_copy_sheet(
     target: Target,
     dry_run: bool,
     creator: &Creator,
-    asset_type: &str,
+    asset_type: Option<&str>,
     client: &Option<Arc<RobloxClient>>,
     studio_sync: &Option<Arc<StudioSync>>,
     debug_sync: &Option<Arc<DebugSync>>,
@@ -259,7 +265,7 @@ pub async fn upload_or_copy_sheet(
                     description: sheet_description.to_string(),
                     data: png_bytes.to_vec(),
                     kind: AssetKind::Image(ImageFormat::Png),
-                    asset_type_override: Some(asset_type.to_string()),
+                    asset_type_override: asset_type.map(|s| s.to_string()),
                     creator: creator.clone(),
                 })
                 .await
