@@ -42,22 +42,26 @@ struct ProcessingError {
     error: anyhow::Error,
 }
 
+struct ProcessImageCtx<'a> {
+    paths: &'a [PathBuf],
+    base_path: &'a str,
+    compress_options: Option<&'a CompressOptions>,
+    bleed: bool,
+    asset_type: Option<&'a str>,
+}
+
 /// Process a single image for individual asset processing (synchronous version for parallel processing)
 #[inline]
 fn process_single_image_sync(
     img: crate::core::assets::img::pack::InputImage,
-    paths: &[PathBuf],
-    base_path: &str,
-    compress_options: Option<&CompressOptions>,
-    bleed: bool,
-    _creator: &Creator,
-    asset_type: Option<&str>,
+    ctx: &ProcessImageCtx<'_>,
 ) -> Result<Pending, ProcessingError> {
     // Find the actual file path for this image
-    let path = paths
+    let path = ctx
+        .paths
         .iter()
         .find(|p| {
-            let rel = relative_path(p, base_path);
+            let rel = relative_path(p, ctx.base_path);
             let rel_stem = Path::new(&rel)
                 .with_extension("")
                 .to_string_lossy()
@@ -70,14 +74,14 @@ fn process_single_image_sync(
 
     // Process the image: optionally alpha bleed, encode, compress, hash
     let mut rgba = img.image.clone();
-    if bleed {
+    if ctx.bleed {
         alpha_bleed(&mut rgba);
     }
     let bytes = encode_png(&rgba).map_err(|e| ProcessingError {
         error: anyhow::anyhow!("Failed to encode \"{}\": {}", img.name, e),
     })?;
 
-    let bytes = maybe_compress_png(bytes, compress_options);
+    let bytes = maybe_compress_png(bytes, ctx.compress_options);
     let hash = hash_image(&bytes);
     let kind = AssetKind::Image(ImageFormat::Png);
     let meta = AssetMeta::load_for(&path).unwrap_or_default();
@@ -92,7 +96,7 @@ fn process_single_image_sync(
         kind,
         display_name,
         description,
-        asset_type: asset_type.map(|s| s.to_string()),
+        asset_type: ctx.asset_type.map(|s| s.to_string()),
     })
 }
 
@@ -136,15 +140,14 @@ pub async fn process_individual(
     let pending_results: Vec<Result<Pending, ProcessingError>> = plain_images
         .into_par_iter()
         .map(|img| {
-            process_single_image_sync(
-                img,
-                &image_paths,
+            let ctx = ProcessImageCtx {
+                paths: &image_paths,
                 base_path,
                 compress_options,
                 bleed,
-                creator,
                 asset_type,
-            )
+            };
+            process_single_image_sync(img, &ctx)
         })
         .collect::<Vec<_>>();
 
