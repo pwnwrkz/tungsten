@@ -1,46 +1,46 @@
 [package]
-name = "tungsten-cli"
-description = "Another command line tool to manage Roblox assets similar to Tarmac and Asphalt."
-version = "3.0.0"
-edition = "2024"
+name         = "tungsten-cli"
+description  = "Another command line tool to manage Roblox assets similar to Tarmac and Asphalt."
+version      = "3.0.0"
+edition      = "2024"
 license-file = "LICENSE"
-readme = "README.md"
-homepage = "https://pwnwrkz.github.io/tungsten-docs"
-repository = "https://github.com/pwnwrkz/tungsten/"
-keywords = ["roblox", "assets", "sync", "upload"]
+readme       = "README.md"
+homepage     = "https://pwnwrkz.github.io/tungsten-docs"
+repository   = "https://github.com/pwnwrkz/tungsten/"
+keywords     = ["roblox", "assets", "sync", "upload"]
 
 exclude = [".github/**", "assets", "assets/**", "examples", "examples/**"]
 include = ["src/", "src/**"]
 
 [dependencies]
-anyhow = "1.0.104"
-bit-vec = "0.10"
-clap = { version = "4.6.4", features = ["derive"] }
-colored = "3.1"
-crunch = "0.5"
-futures-util = "0.3.33"
-glob = "0.3.4"
-hex = "0.4.3"
-image = { version = "0.25", features = ["jpeg", "bmp", "tga"] }
-crossterm = "0.29.0"
-inquire = { version = "0.9", features = ["crossterm"] }
-libcaesium = "0.20"
-notify = "8.2"
-rayon = "1.12.0"
-rbx_binary = "3.0"
-rbx_xml = "3.0"
+anyhow        = "1.0.104"
+bit-vec       = "0.10"
+clap          = { version = "4.6.5", features = ["derive"] }
+colored       = "3.1"
+crunch        = "0.5"
+futures-util  = "0.3.33"
+glob          = "0.3.4"
+hex           = "0.4.3"
+image         = { version = "0.25", features = ["jpeg", "bmp", "tga"] }
+crossterm     = "0.29.0"
+inquire       = { version = "0.9", features = ["crossterm"] }
+libcaesium    = "0.20"
+notify        = "8.2"
+rayon         = "1.12.0"
+rbx_binary    = "3.0"
+rbx_xml       = "3.0"
 relative-path = { version = "2.0.1", features = ["serde"] }
-reqwest = { version = "0.13.4", features = ["json", "multipart", "blocking"] }
-resvg = "0.47"
-rbx_install = "0.2.0"
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
-sha2 = "0.11"
-tempfile = "3.27"
-tiny-skia = "0.12"
-tokio = { version = "1.53.1", features = ["full"] }
-toml = "1.1.4"
-usvg = "0.47"
+reqwest       = { version = "0.13.4", features = ["json", "multipart", "blocking"] }
+resvg         = "0.48"
+rbx_install   = "0.2.0"
+serde         = { version = "1.0.229", features = ["derive"] }
+serde_json    = "1.0.151"
+sha2          = "0.11"
+tempfile      = "3.27"
+tiny-skia     = "0.12"
+tokio         = { version = "1.53.1", features = ["full"] }
+toml          = "1.1.4"
+usvg          = "0.48"
 
 [[bin]]
 name = "tungsten"
@@ -49,4 +49,4 @@ path = "src/main.rs"
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"
-lto = "thin"
+lto      = "thin"
