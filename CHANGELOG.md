@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Global `--verbose` flag that enables debug-level log output for troubleshooting
+- Debug logging across upload, sync, init, watch, config parsing, and API key resolution paths
+
+### Changed
+
+- Replaced loose per-image parameters in individual sync with a `ProcessImageCtx` context struct
+- Bumped `clap` to 4.6.5 and `resvg`/`usvg` to 0.48
+- Capitalized app name in help output
+
+### Removed
+
+- Removed LucideRoblox origin note and Windows-only disclaimer from README
+
 ## [v3.0.0]
 
 ### Added
