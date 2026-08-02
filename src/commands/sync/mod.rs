@@ -75,6 +75,8 @@ pub async fn run(
     let api_key = resolve_api_key(api_key);
     let mut total_errors: u32 = 0;
 
+    log!(debug, "Sync target: {:?}, dry_run={}", target, dry_run);
+
     let mut lockfile = Lockfile::load().context("Failed to load lockfile")?;
 
     if dry_run {
@@ -162,8 +164,11 @@ pub async fn run(
 
     let max_concurrent_uploads = config.max_concurrent_uploads;
 
+    log!(debug, "max_concurrent_uploads={}", max_concurrent_uploads);
+
     for (input_name, input) in &config.inputs {
         log!(section, "SYNCING \"{}\"", input_name);
+        log!(debug, "Input \"{}\" path: {}", input_name, input.path);
 
         let paths = match collect_paths(&input.path) {
             Ok(p) if p.is_empty() => {

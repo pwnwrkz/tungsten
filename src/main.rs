@@ -10,11 +10,15 @@ use utils::config;
 
 #[derive(Parser)]
 #[command(
-    name = "tungsten",
+    name = "Tungsten",
     version,
     about = "A command line tool to manage Roblox assets similar to Tarmac and Asphalt."
 )]
 struct Cli {
+    /// Enable verbose logging for troubleshooting
+    #[arg(short, long, global = true)]
+    verbose: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -56,6 +60,8 @@ enum Commands {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+
+    utils::logger::set_verbose(cli.verbose);
 
     // Shared flag so watch::run can signal whether a sync is in progress.
     // Only meaningful for the Watch command; ignored by all others.

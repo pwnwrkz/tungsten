@@ -1,23 +1,41 @@
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static VERBOSE: AtomicBool = AtomicBool::new(false);
+
+/// Turn verbose (debug) logging on/off. Called once from main().
+pub fn set_verbose(on: bool) {
+    VERBOSE.store(on, Ordering::Relaxed);
+}
+
+/// True when debug-level messages should be printed.
+pub fn verbose_enabled() -> bool {
+    VERBOSE.load(Ordering::Relaxed)
+}
 
 #[macro_export]
 macro_rules! log {
     ($level:ident, $($arg:tt)*) => {{
         use colored::Colorize;
-        let msg = format!($($arg)*);
-        match stringify!($level) {
-            "info"    => println!("{} {}", " INFO    ".on_white().black().bold(), msg.white()),
-            "success" => println!("{} {}", " SUCCESS ".on_bright_green().green().bold(), msg.green()),
-            "warn"    => println!("{} {}", " WARNING ".on_bright_yellow().yellow().bold(), msg.yellow()),
-            "error"   => println!("{} {}", " ERROR   ".on_bright_red().red().bold(), msg.red()),
-            "section" => {
-                let width = crossterm::terminal::size()
-                    .map(|(w, _)| w as usize)
-                    .unwrap_or(120);
-                let padded = format!(" {}", msg);
-                println!("\n{}", format!("{:<width$}", padded, width = width).blue().bold().on_cyan());
+        let level = stringify!($level);
+        let emit = level != "debug" || $crate::utils::logger::verbose_enabled();
+        if emit {
+            let msg = format!($($arg)*);
+            match level {
+                "debug"   => println!("{} {}", " DEBUG   ".on_blue().black().bold(), msg.blue()),
+                "info"    => println!("{} {}", " INFO    ".on_white().black().bold(), msg.white()),
+                "success" => println!("{} {}", " SUCCESS ".on_bright_green().green().bold(), msg.green()),
+                "warn"    => println!("{} {}", " WARNING ".on_bright_yellow().yellow().bold(), msg.yellow()),
+                "error"   => println!("{} {}", " ERROR   ".on_bright_red().red().bold(), msg.red()),
+                "section" => {
+                    let width = crossterm::terminal::size()
+                        .map(|(w, _)| w as usize)
+                        .unwrap_or(120);
+                    let padded = format!(" {}", msg);
+                    println!("\n{}", format!("{:<width$}", padded, width = width).blue().bold().on_cyan());
+                }
+                _         => println!("{}", msg),
             }
-            _         => println!("{}", msg),
         }
     }};
 }

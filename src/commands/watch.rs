@@ -71,6 +71,7 @@ pub async fn run(
             match rx.try_recv() {
                 Ok(Ok(event)) => {
                     if is_relevant_event(&event) {
+                        log!(debug, "Change detected: {:?}", event.kind);
                         last_event = Some(Instant::now());
                         pending_change = true;
                     }
@@ -88,6 +89,7 @@ pub async fn run(
             && let Some(t) = last_event
             && t.elapsed() >= Duration::from_millis(DEBOUNCE_MS)
         {
+            log!(debug, "Debounce window elapsed, triggering re-sync");
             pending_change = false;
             last_event = None;
             log!(section, "RE-SYNCING");

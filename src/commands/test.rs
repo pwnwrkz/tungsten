@@ -65,6 +65,7 @@ pub async fn run(config: Config, api_key: Option<String>) -> Result<()> {
 
     for (name, input) in &config.inputs {
         log!(info, "Checking input \"{}\"...", name);
+        log!(debug, "Input \"{}\" path: {}", name, input.path);
 
         let paths = collect_paths(&input.path)
             .map_err(|e| anyhow::anyhow!("Invalid glob for \"{}\": {}", name, e))?;

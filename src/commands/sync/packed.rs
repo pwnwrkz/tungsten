@@ -179,7 +179,7 @@ pub async fn process_packed(
             let sheet_name = format!("{}_{:03}", sheet_base, idx + 1);
             progress("Packing", idx + 1, sheet_total, &sheet_name);
 
-            let asset_ref = upload_or_copy_sheet(
+            let asset_ref = match upload_or_copy_sheet(
                 &png_bytes,
                 &hash,
                 &sheet_name,
@@ -195,9 +195,8 @@ pub async fn process_packed(
                 lockfile,
                 studio_expected_files,
             )
-            .await;
-
-            let asset_ref = match asset_ref {
+            .await
+            {
                 Ok(r) => r,
                 Err(e) => {
                     log!(warn, "{}", e);
@@ -253,6 +252,13 @@ pub async fn upload_or_copy_sheet(
     match target {
         Target::Cloud => {
             if let Some(cached) = lockfile.get(input_name, hash) {
+                clear_progress_line();
+                log!(
+                    debug,
+                    "{}: unchanged, skipping (cached asset {})",
+                    sheet_name,
+                    cached
+                );
                 return Ok(codegen::AssetRef::Id(cached));
             }
             let Some(c) = client else {

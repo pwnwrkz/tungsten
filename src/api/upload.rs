@@ -70,6 +70,14 @@ impl RobloxClient {
 
         let mime = params.kind.mime();
 
+        log!(
+            debug,
+            "Uploading {} ({} bytes, {})",
+            params.display_name,
+            params.data.len(),
+            mime
+        );
+
         let response = self
             .send_with_retry(|client| {
                 let form = multipart::Form::new()
@@ -94,14 +102,35 @@ impl RobloxClient {
             .await
             .context("Failed to parse upload response")?;
 
-        self.poll_operation(&operation.operation_id).await
+        log!(
+            debug,
+            "Upload accepted for {}, operation {}",
+            params.display_name,
+            operation.operation_id
+        );
+
+        let asset_id = self.poll_operation(&operation.operation_id).await?;
+        log!(
+            debug,
+            "Uploaded {} -> asset {}",
+            params.display_name,
+            asset_id
+        );
+        Ok(asset_id)
     }
 
     async fn poll_operation(&self, operation_id: &str) -> Result<u64> {
         const MAX_POLLS: u32 = 10;
         let mut delay = Duration::from_secs(1);
 
-        for _ in 0..MAX_POLLS {
+        for attempt in 0..MAX_POLLS {
+            log!(
+                debug,
+                "Polling operation {} (attempt {}/{})",
+                operation_id,
+                attempt + 1,
+                MAX_POLLS
+            );
             tokio::time::sleep(delay).await;
 
             let response = self
@@ -172,6 +201,8 @@ impl RobloxClient {
                 .send()
                 .await
                 .context("Failed to send request")?;
+
+            log!(debug, "API request returned {}", response.status());
 
             match response.status() {
                 reqwest::StatusCode::OK => return Ok(response),

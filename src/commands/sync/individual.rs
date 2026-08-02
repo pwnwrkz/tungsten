@@ -225,6 +225,13 @@ pub async fn process_individual(
             }
             Target::Cloud => {
                 if let Some(cached_id) = lockfile.get(input_name, &p.hash) {
+                    clear_progress_line();
+                    log!(
+                        debug,
+                        "{}: unchanged, skipping (cached asset {})",
+                        p.name,
+                        cached_id
+                    );
                     dispatched += 1;
                     progress("Uploading", dispatched, total, p.name.as_str());
                     codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), cached_id));

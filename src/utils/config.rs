@@ -7,6 +7,7 @@ use toml;
 
 use crate::core::assets::asset::WebAsset;
 use crate::core::assets::img::compress::CompressOptions as ResolvedCompressOptions;
+use crate::log;
 
 const MIN_SVG_SCALE: f32 = 0.01;
 
@@ -264,12 +265,23 @@ pub fn load(path: &str) -> Result<Config> {
         )
     })?;
 
-    toml::from_str(&content).with_context(|| {
+    let config: Config = toml::from_str(&content).with_context(|| {
         format!(
             "Failed to parse \"{}\" — check for missing or invalid fields",
             path
         )
-    })
+    })?;
+
+    log!(
+        debug,
+        "Loaded config {}: {} input(s), creator {} {}",
+        path,
+        config.inputs.len(),
+        config.creator.creator_type,
+        config.creator.id
+    );
+
+    Ok(config)
 }
 
 // Tests

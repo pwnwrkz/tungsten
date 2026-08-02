@@ -69,6 +69,7 @@ pub fn run() -> Result<()> {
     // 3. Discover and select folders
     log!(section, "SCANNING FOR ASSET DIRECTORIES");
     let discovered = discover_asset_folders(".")?;
+    log!(debug, "Discovered {} asset folder(s)", discovered.len());
 
     let selected_folders = if discovered.is_empty() {
         log!(
@@ -106,6 +107,12 @@ pub fn run() -> Result<()> {
 
     std::fs::write("tungsten.toml", &config_content)
         .map_err(|e| anyhow::anyhow!("Failed to create tungsten.toml: {}", e))?;
+
+    log!(
+        debug,
+        "Wrote tungsten.toml ({} bytes)",
+        config_content.len()
+    );
 
     log!(success, "Created tungsten.toml");
     if !selected_folders.is_empty() {

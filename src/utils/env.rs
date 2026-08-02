@@ -1,5 +1,7 @@
 use std::env;
 
+use crate::log;
+
 const ENV_FILE: &str = ".env";
 const ENV_KEY: &str = "TUNGSTEN_API_KEY";
 const GLOBAL_VAR: &str = "TUNGSTEN_GLOBAL_APIKEY";
@@ -7,6 +9,7 @@ const GLOBAL_VAR: &str = "TUNGSTEN_GLOBAL_APIKEY";
 pub fn resolve_api_key(flag: Option<String>) -> Option<String> {
     // Explicit flag
     if flag.is_some() {
+        log!(debug, "API key resolved from CLI flag");
         return flag;
     }
 
@@ -18,6 +21,7 @@ pub fn resolve_api_key(flag: Option<String>) -> Option<String> {
                 if !val.is_empty() && val.starts_with('=') {
                     let val = val[1..].trim().to_string();
                     if !val.is_empty() {
+                        log!(debug, "API key resolved from {}", ENV_FILE);
                         return Some(val);
                     }
                 }
@@ -26,7 +30,21 @@ pub fn resolve_api_key(flag: Option<String>) -> Option<String> {
     }
 
     // Global system env var
-    env::var(GLOBAL_VAR).ok()
+    match env::var(GLOBAL_VAR).ok() {
+        Some(key) => {
+            log!(debug, "API key resolved from {}", GLOBAL_VAR);
+            Some(key)
+        }
+        None => {
+            log!(
+                debug,
+                "No API key found (no CLI flag, no {}, no {})",
+                ENV_FILE,
+                GLOBAL_VAR
+            );
+            None
+        }
+    }
 }
 
 #[cfg(test)]
