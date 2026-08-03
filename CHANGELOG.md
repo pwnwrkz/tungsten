@@ -5,22 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [v3.1.0]
 
 ### Added
 
+- Web asset support: `WebAsset` type with automatic animation detection for `rbxm`/`rbxmx`/`fbx` files
+- Optional `asset_type` and web asset mapping in input configuration, with per-input `asset_type` override resolution propagated to all sync processors
+- Web asset support in individual, packed, and raw sync processors, all sharing a common compress helper
+- `seed_web_assets` codegen helper and simplified `write_codegen` output
+- Rewritten `init` command with interactive prompts for creator, folder selection, and codegen output
+- Interactive folder selector in `init` with type cycling and multi-select fallback
 - Global `--verbose` flag that enables debug-level log output for troubleshooting
 - Debug logging across upload, sync, init, watch, config parsing, and API key resolution paths
 
 ### Changed
 
+- Log formatting updated to colored backgrounds and section headers
+- Capitalized section headers in the test and watch commands
 - Replaced loose per-image parameters in individual sync with a `ProcessImageCtx` context struct
+- Moved `maybe_compress_png` to the public API and removed the unused parallel variant
 - Bumped `clap` to 4.6.5 and `resvg`/`usvg` to 0.48
-- Capitalized app name in help output
+- Capitalized the app name in help output
+
+### Fixed
+
+- Punctuation in CLI error messages (removed stray trailing period)
 
 ### Removed
 
-- Removed LucideRoblox origin note and Windows-only disclaimer from README
+- LucideRoblox origin note and Windows-only disclaimer from README
 
 ## [v3.0.0]
 
