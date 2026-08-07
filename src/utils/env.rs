@@ -54,10 +54,22 @@ mod tests {
 
     #[test]
     fn test_global_env_var() {
+        // Backup existing .env if present so CI repo files don't interfere with this test
+        let mut backed_up = false;
+        if fs::metadata(".env").is_ok() {
+            fs::rename(".env", ".env.backup").unwrap();
+            backed_up = true;
+        }
+
         unsafe { std::env::set_var(GLOBAL_VAR, "test_global_key") };
         let result = resolve_api_key(None);
         unsafe { std::env::remove_var(GLOBAL_VAR) };
         assert_eq!(result, Some("test_global_key".to_string()));
+
+        // Restore .env if we backed it up
+        if backed_up {
+            fs::rename(".env.backup", ".env").unwrap();
+        }
     }
 
     #[test]
