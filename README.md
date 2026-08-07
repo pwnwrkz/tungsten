@@ -6,7 +6,6 @@
     <br/>
     <h2>Another command line tool to handle Roblox assets similar to Tarmac and Asphalt.</h2>
     <p>Designed originally for images, Tungsten mimics Asphalt and Tarmac closely, with spritesheet packing that Asphalt lacks.</p>
-    <br>
 </div>
 
 # Documentation
@@ -17,7 +16,7 @@ Read the Tungsten documentation [here](https://pwnwrkz.github.io/tungsten)
 
 ### Tungsten
 
-- [notmagniill](https://github.com/notmagniill) - Everything
+- [notmagniill](https://github.com/notmagniill) - Everything (prior to v3.1.0)
 
 ### Special Thanks
 
