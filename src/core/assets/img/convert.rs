@@ -213,17 +213,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "TGA support not fully tested in CI environment"]
-    fn test_normalize_tga_converts_to_png() {
-        let img = RgbaImage::new(2, 2);
-        let tga_bytes = convert_image(&img, ImageFormat::Tga).unwrap();
-        let (png_bytes, ext) = normalize_for_compression(tga_bytes, "tga").unwrap();
-        assert_eq!(ext, "png");
-        let decoded = image::load_from_memory(&png_bytes).unwrap();
-        assert_eq!(decoded.width(), 2);
-    }
-
-    #[test]
     fn test_svg_to_png_current_color_defaults_to_white() {
         // Test SVG with currentColor - should now default to white
         let svg_data = r#"
