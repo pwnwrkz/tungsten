@@ -44,15 +44,14 @@ This is the most important rule: **you are fully responsible for every line you 
 
 **AI prompt and instruction files must never be committed to this repository.** This includes, but is not limited to:
 
-| File                              | Tool                          |
-| --------------------------------- | ----------------------------- |
-| `CLAUDE.md`                       | Claude / Anthropic            |
-| `AGENTS.md`                       | OpenAI Codex / general agents |
-| `.cursorrules`                    | Cursor                        |
-| `.github/copilot-instructions.md` | GitHub Copilot                |
-| `copilot-instructions.md`         | GitHub Copilot                |
-| `.aider*`                         | Aider                         |
-| `GEMINI.md`                       | Gemini CLI                    |
+| File                                                         | Tool                          |
+| ------------------------------------------------------------ | ----------------------------- |
+| `CLAUDE.md`                                                  | Claude / Anthropic            |
+| `AGENTS.md`                                                  | OpenAI Codex / general agents |
+| `.cursorrules`, `.cursor/rules`, `.mdc*`                     | Cursor                        |
+| `.github/copilot-instructions.md`, `copilot-instructions.md` | GitHub Copilot                |
+| `.aider*`                                                    | Aider                         |
+| `GEMINI.md`                                                  | Antigravity                   |
 
 These are personal configuration files for your local AI setup and have no place in the project repository. Either delete them when you're done, or add them to `.git/info/exclude` to keep them out of commits without touching any shared files.
 
