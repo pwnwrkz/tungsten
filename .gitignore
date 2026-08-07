@@ -46,3 +46,15 @@ pnpm-debug.log*
 
 # macOS-specific files
 .DS_Store
+
+# Agent guide files
+# These are some examples of agent guide files, you may add more as you go.
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.cursorrules
+.cursor/rules
+.mdc*
+.aider*
+.github/copilot-instructions.md
+copilot-instructions.md
