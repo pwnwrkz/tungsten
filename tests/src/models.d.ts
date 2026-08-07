@@ -2,9 +2,9 @@
 // It is not intended for manual editing.
 
 declare const models: {
-  Bubble: string;
-  Health: string;
-  Meshes: string;
-};
+	Bubble: string
+	Health: string
+	Meshes: string
+}
 
-export = models;
+export = models

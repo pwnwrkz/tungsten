@@ -2,10 +2,10 @@
 -- It is not intended for manual editing.
 
 local images = {
-	check = "rbxassetid://109133388816606",
-	["chevron-down"] = "rbxassetid://86359927170539",
-	search = "rbxassetid://98785309446023",
-	x = "rbxassetid://127198545704571",
+	check = "rbxassetid://132547531785530",
+	["chevron-down"] = "rbxassetid://72696361857151",
+	search = "rbxassetid://86170962381219",
+	x = "rbxassetid://113442300210745",
 }
 
 return images
