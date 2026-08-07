@@ -11,6 +11,7 @@ ts_declaration = true
 path = "assets/images/**/*"
 output_path = "src/images.luau"
 type = "image"
+packable = true
 svg_scale = 5.0
 
 [inputs.models]
