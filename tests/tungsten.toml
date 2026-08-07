@@ -1,13 +1,19 @@
 [creator]
 type = "user"
-id = 0
+id = 10300423610
 
 [codegen]
-style = "flat"
+style = "nested"
 strip_extension = true
+ts_declaration = true
 
-[inputs.assets]
-path = "assets/*"
-output_path = "src/assets.luau"
-packable = true
+[inputs.images]
+path = "assets/images/**/*"
+output_path = "src/images.luau"
+type = "image"
+svg_scale = 5.0
 
+[inputs.models]
+path = "assets/models/**/*"
+output_path = "src/models.luau"
+type = "model"

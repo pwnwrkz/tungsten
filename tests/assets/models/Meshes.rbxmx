@@ -1,0 +1,99 @@
+<roblox xmlns:xmime="http://www.w3.org/2005/05/xmlmime" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.roblox.com/roblox.xsd" version="4">
+	<Meta name="ExplicitAutoJoints">true</Meta>
+	<External>null</External>
+	<External>nil</External>
+	<Item class="Folder" referent="RBXAA04AB55479148BBB55C5075C7FF607E">
+		<Properties>
+			<BinaryString name="AttributesSerialize"></BinaryString>
+			<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+			<bool name="DefinesCapabilities">false</bool>
+			<string name="Name">Meshes</string>
+			<int64 name="SourceAssetId">-1</int64>
+			<BinaryString name="Tags"></BinaryString>
+		</Properties>
+		<Item class="CharacterMesh" referent="RBX9141C05FD33F4943969965CBB5FEADE6">
+			<Properties>
+				<int64 name="BaseTextureId">0</int64>
+				<token name="BodyPart">2</token>
+				<int64 name="MeshId">1112256772</int64>
+				<int64 name="OverlayTextureId">0</int64>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">CL_LeftArm</string>
+				<int64 name="SourceAssetId">-1</int64>
+				<BinaryString name="Tags">Tm9CZXZlbHM=</BinaryString>
+			</Properties>
+		</Item>
+		<Item class="CharacterMesh" referent="RBX9920821241594B49BBB4B439816FEE8A">
+			<Properties>
+				<int64 name="BaseTextureId">0</int64>
+				<token name="BodyPart">4</token>
+				<int64 name="MeshId">1112275294</int64>
+				<int64 name="OverlayTextureId">0</int64>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">CL_LeftLeg</string>
+				<int64 name="SourceAssetId">-1</int64>
+				<BinaryString name="Tags">Tm9CZXZlbHM=</BinaryString>
+			</Properties>
+		</Item>
+		<Item class="CharacterMesh" referent="RBX3F1F844C4717423EBA87E0D48AC87002">
+			<Properties>
+				<int64 name="BaseTextureId">0</int64>
+				<token name="BodyPart">5</token>
+				<int64 name="MeshId">1112267576</int64>
+				<int64 name="OverlayTextureId">0</int64>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">CL_RightLeg</string>
+				<int64 name="SourceAssetId">-1</int64>
+				<BinaryString name="Tags">Tm9CZXZlbHM=</BinaryString>
+			</Properties>
+		</Item>
+		<Item class="CharacterMesh" referent="RBX329560C52987491AAF9B5DBB8749420F">
+			<Properties>
+				<int64 name="BaseTextureId">0</int64>
+				<token name="BodyPart">3</token>
+				<int64 name="MeshId">1112244824</int64>
+				<int64 name="OverlayTextureId">0</int64>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">CL_RightArm</string>
+				<int64 name="SourceAssetId">-1</int64>
+				<BinaryString name="Tags">Tm9CZXZlbHM=</BinaryString>
+			</Properties>
+		</Item>
+		<Item class="CharacterMesh" referent="RBX37232FBC873E4B69B9F613BB42F93D66">
+			<Properties>
+				<int64 name="BaseTextureId">0</int64>
+				<token name="BodyPart">1</token>
+				<int64 name="MeshId">1112228624</int64>
+				<int64 name="OverlayTextureId">0</int64>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">CL_ManTorso</string>
+				<int64 name="SourceAssetId">-1</int64>
+				<BinaryString name="Tags">Tm9CZXZlbHM=</BinaryString>
+			</Properties>
+		</Item>
+		<Item class="CharacterMesh" referent="RBX96AD610C5DE64FFD99916352869D51A5">
+			<Properties>
+				<int64 name="BaseTextureId">0</int64>
+				<token name="BodyPart">1</token>
+				<int64 name="MeshId">93214959310942</int64>
+				<int64 name="OverlayTextureId">0</int64>
+				<BinaryString name="AttributesSerialize"></BinaryString>
+				<SecurityCapabilities name="Capabilities">0</SecurityCapabilities>
+				<bool name="DefinesCapabilities">false</bool>
+				<string name="Name">CL_WomanTorso</string>
+				<int64 name="SourceAssetId">-1</int64>
+				<BinaryString name="Tags"></BinaryString>
+			</Properties>
+		</Item>
+	</Item>
+</roblox>
