@@ -162,7 +162,7 @@ pub async fn process_packed(
             )
             .collect();
 
-        let mut codegen_entries = Vec::with_capacity(spritesheets.len() * 2);
+        codegen_entries.reserve(spritesheets.len() * 2);
 
         for (idx, result) in processed_sheets.into_iter().enumerate() {
             let processed = match result {
@@ -311,5 +311,62 @@ pub async fn upload_or_copy_sheet(
                 lockfile.get(input_name, hash).unwrap_or(0),
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::sync::roblox::{Creator, UserCreator};
+
+    #[test]
+    fn packed_images_are_added_to_codegen() {
+        let output_dir = tempfile::tempdir().unwrap();
+        let output_path = output_dir.path().join("icons.luau");
+        let images = vec![pack::InputImage {
+            name: "settings".to_string(),
+            image: RgbaImage::new(16, 16),
+        }];
+        let creator = Creator::User(UserCreator {
+            user_id: "0".to_string(),
+        });
+        let client = None;
+        let studio_sync = None;
+        let debug_sync = None;
+        let mut lockfile = Lockfile::default();
+        let mut studio_expected_files = None;
+        let web_assets = HashMap::new();
+
+        let errors = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(process_packed(
+                "icons",
+                &AssetMeta::default(),
+                images,
+                output_path.to_str().unwrap(),
+                "flat",
+                true,
+                false,
+                None,
+                false,
+                Target::Debug,
+                false,
+                &creator,
+                None,
+                &client,
+                &studio_sync,
+                &debug_sync,
+                &mut lockfile,
+                &mut studio_expected_files,
+                1,
+                &web_assets,
+                "",
+            ));
+
+        assert_eq!(errors, 0);
+        let generated = std::fs::read_to_string(output_path).unwrap();
+        assert!(generated.contains("settings"));
+        assert!(generated.contains("ImageRectOffset"));
+        assert!(generated.contains("ImageRectSize"));
     }
 }
