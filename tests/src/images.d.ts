@@ -2,10 +2,18 @@
 // It is not intended for manual editing.
 
 declare const images: {
-	check: string
-	"chevron-down": string
-	search: string
-	x: string
+	check: {
+		Image: string
+		ImageRectOffset: Vector2
+		ImageRectSize: Vector2
+	}
+	"chevron-down": (dpiScale: number) => string
+	search: (dpiScale: number) => string
+	x: {
+		Image: string
+		ImageRectOffset: Vector2
+		ImageRectSize: Vector2
+	}
 }
 
 export = images

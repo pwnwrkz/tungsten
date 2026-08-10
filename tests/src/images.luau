@@ -2,10 +2,32 @@
 -- It is not intended for manual editing.
 
 local images = {
-	check = "rbxassetid://132547531785530",
-	["chevron-down"] = "rbxassetid://72696361857151",
-	search = "rbxassetid://86170962381219",
-	x = "rbxassetid://113442300210745",
+	check = {
+		Image = "rbxassetid://87539991074329",
+		ImageRectOffset = Vector2.new(0, 0),
+		ImageRectSize = Vector2.new(120, 120),
+	},
+	["chevron-down"] = function(dpiScale)
+		if dpiScale >= 2 then
+			return "rbxassetid://75974059674487"
+		else
+			return "rbxassetid://75974059674487"
+		end
+	end,
+	search = function(dpiScale)
+		if dpiScale >= 3 then
+			return "rbxassetid://132622878486935"
+		elseif dpiScale >= 2 then
+			return "rbxassetid://132622878486935"
+		else
+			return "rbxassetid://132622878486935"
+		end
+	end,
+	x = {
+		Image = "rbxassetid://87539991074329",
+		ImageRectOffset = Vector2.new(120, 0),
+		ImageRectSize = Vector2.new(120, 120),
+	},
 }
 
 return images
