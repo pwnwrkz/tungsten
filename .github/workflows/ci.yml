@@ -24,7 +24,12 @@ jobs:
 
     strategy:
       matrix:
-        os: [ubuntu-latest, blacksmith-4vcpu-windows-2025, macos-latest]
+        os:
+          [
+            blacksmith-2vcpu-ubuntu-2404,
+            blacksmith-4vcpu-windows-2025,
+            blacksmith-6vcpu-macos-latest,
+          ]
 
     steps:
       - uses: actions/checkout@v7
