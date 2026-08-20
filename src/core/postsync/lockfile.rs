@@ -28,7 +28,6 @@ pub struct LockfileEntry {
     pub studio_uri: Option<String>,
 }
 
-#[allow(dead_code)]
 impl Lockfile {
     pub fn load() -> Result<Self> {
         let path = std::path::Path::new(LOCKFILE_PATH);
@@ -76,26 +75,10 @@ impl Lockfile {
         Ok(())
     }
 
-    /// Force a save regardless of dirty state. Useful for explicit flush points.
-    pub fn force_save(&mut self) -> Result<()> {
-        self.dirty = true;
-        self.save()
-    }
-
     /// Look up a cached cloud asset ID.
     #[inline]
     pub fn get(&self, input_name: &str, hash: &str) -> Option<u64> {
         self.inputs.get(input_name)?.get(hash)?.asset_id
-    }
-
-    /// Look up a cached Studio content URI.
-    #[inline]
-    pub fn get_uri(&self, input_name: &str, hash: &str) -> Option<&str> {
-        self.inputs
-            .get(input_name)?
-            .get(hash)?
-            .studio_uri
-            .as_deref()
     }
 
     /// Store a cloud asset ID, preserving any existing studio_uri for the same hash.
@@ -132,6 +115,7 @@ impl Lockfile {
 
     /// Returns `true` if there are unsaved changes.
     #[inline]
+    #[allow(dead_code)] // only used by tests today, kept for the dirty-tracking behaviour it verifies
     pub fn is_dirty(&self) -> bool {
         self.dirty
     }
@@ -150,6 +134,7 @@ pub fn hash_image(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn test_dirty_flag_on_set() {
@@ -176,7 +161,10 @@ mod tests {
         assert!(lf.save().is_ok());
     }
 
+    /// Mutates a process-global env var — must not run concurrently with
+    /// `env::tests::test_global_env_var` (both use the bare `#[serial]` lock).
     #[test]
+    #[serial]
     fn test_global_env_var() {
         // Kept for parity with the old test suite.
         use crate::utils::env::resolve_api_key;

@@ -1,8 +1,7 @@
 use anyhow::Result;
+use bytes::Bytes;
 use std::sync::Arc;
 
-#[allow(unused_imports)]
-use crate::api::sync::roblox::{Creator, GroupCreator, UserCreator};
 use crate::api::upload::{RobloxClient, UploadParams};
 use crate::commands::sync::make_creator;
 use crate::commands::sync::paths::collect_paths;
@@ -30,7 +29,7 @@ const FALLBACK_PNG: &[u8] = &[
 ];
 
 pub async fn run(config: Config, api_key: Option<String>) -> Result<()> {
-    let api_key = resolve_api_key(api_key);
+    let api_key = resolve_api_key(api_key.as_deref());
     let mut warnings: u32 = 0;
     let mut passed: u32 = 0;
 
@@ -53,7 +52,7 @@ pub async fn run(config: Config, api_key: Option<String>) -> Result<()> {
                 "Invalid creator type \"{}\" — must be \"user\" or \"group\"",
                 other
             );
-            return Ok(());
+            return Err(anyhow::anyhow!("Invalid creator type: {}", other));
         }
     }
 
@@ -108,7 +107,8 @@ pub async fn run(config: Config, api_key: Option<String>) -> Result<()> {
         };
 
         // Use the embedded fallback PNG — small, fast, no disk I/O needed.
-        let test_bytes = FALLBACK_PNG.to_vec();
+        // `from_static` wraps the const slice without copying.
+        let test_bytes = Bytes::from_static(FALLBACK_PNG);
 
         log!(info, "Uploading test asset (1×1 transparent PNG)...");
 

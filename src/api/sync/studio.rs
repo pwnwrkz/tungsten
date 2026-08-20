@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use rbx_install::RobloxStudio;
 use reqwest;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 /// A handle to the Roblox Studio content folder for this project.
 /// Assets are copied into `.tungsten_{project}/` using their original
@@ -13,6 +15,9 @@ pub struct StudioSync {
     identifier: String,
     /// Absolute path to the subfolder we copy into.
     sync_path: PathBuf,
+    /// Directories already ensured to exist, so we skip the `create_dir_all`
+    /// syscall for subsequent assets in the same folder.
+    created_dirs: Mutex<HashSet<PathBuf>>,
 }
 
 impl StudioSync {
@@ -23,7 +28,7 @@ impl StudioSync {
     /// https://setup.roblox.com/versionQTStudio and appended to the path.
     /// Does not wipe previous contents to allow incremental sync and preserve
     /// assets between Studio version updates.
-    pub fn new(studio_path_override: Option<String>, auto_route_version: bool) -> Result<Self> {
+    pub async fn new(studio_path_override: Option<String>, auto_route_version: bool) -> Result<Self> {
         let base_path = if let Some(path) = studio_path_override {
             PathBuf::from(path)
         } else {
@@ -34,10 +39,12 @@ impl StudioSync {
 
         let content_path = if auto_route_version {
             let mut path = base_path;
-            // Fetch the latest version from Roblox
-            let version = reqwest::blocking::get("https://setup.roblox.com/versionQTStudio")
+            // Fetch the latest version from Roblox (async)
+            let version = reqwest::get("https://setup.roblox.com/versionQTStudio")
+                .await
                 .context("Failed to fetch latest Roblox Studio version")?
                 .text()
+                .await
                 .context("Failed to read version response")?
                 .trim()
                 .to_string();
@@ -80,6 +87,7 @@ impl StudioSync {
         Ok(Self {
             identifier,
             sync_path,
+            created_dirs: Mutex::new(HashSet::new()),
         })
     }
 
@@ -88,19 +96,26 @@ impl StudioSync {
     ///
     /// Returns the `rbxasset://` URI that scripts should use to reference it.
     pub fn copy_asset(&self, relative_path: &str, data: &[u8]) -> Result<String> {
-        // Normalise to forward slashes for the URI, use OS separator for the path.
+        // Normalise to forward slashes for the URI.
         let rel_normalized = relative_path.replace('\\', "/");
-        let target_path = self.sync_path.join(Path::new(
-            &rel_normalized.replace('/', std::path::MAIN_SEPARATOR_STR),
-        ));
+        // Build the target path by pushing each component, avoiding the two
+        // intermediate String allocations a separator replace would need.
+        let mut target_path = self.sync_path.clone();
+        for part in rel_normalized.split('/') {
+            target_path.push(part);
+        }
 
         if let Some(parent) = target_path.parent() {
-            std::fs::create_dir_all(parent).with_context(|| {
-                format!(
-                    "Failed to create directory for \"{}\"",
-                    target_path.display()
-                )
-            })?;
+            let mut created = self.created_dirs.lock().unwrap();
+            if !created.contains(parent) {
+                std::fs::create_dir_all(parent).with_context(|| {
+                    format!(
+                        "Failed to create directory for \"{}\"",
+                        target_path.display()
+                    )
+                })?;
+                created.insert(parent.to_path_buf());
+            }
         }
 
         std::fs::write(&target_path, data)
@@ -109,55 +124,7 @@ impl StudioSync {
         Ok(format!("rbxasset://{}/{}", self.identifier, rel_normalized))
     }
 
-    /// The `rbxasset://` URI for a relative path without copying anything.
-    /// Used to regenerate codegen values from already-synced assets.
-    #[allow(dead_code)]
-    pub fn asset_uri(&self, relative_path: &str) -> String {
-        let rel_normalized = relative_path.replace('\\', "/");
-        format!("rbxasset://{}/{}", self.identifier, rel_normalized)
-    }
-
     pub fn sync_path(&self) -> &Path {
         &self.sync_path
-    }
-
-    #[allow(dead_code)]
-    pub fn identifier(&self) -> &str {
-        &self.identifier
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_asset_uri_format() {
-        // We can test URI formatting without actually locating Studio.
-        let fake = StudioSync {
-            identifier: ".tungsten_my-project".to_string(),
-            sync_path: PathBuf::from("/fake/content/.tungsten_my-project"),
-        };
-
-        assert_eq!(
-            fake.asset_uri("icons/arrow.png"),
-            "rbxasset://.tungsten_my-project/icons/arrow.png"
-        );
-        assert_eq!(
-            fake.asset_uri("sounds/click.mp3"),
-            "rbxasset://.tungsten_my-project/sounds/click.mp3"
-        );
-    }
-
-    #[test]
-    fn test_asset_uri_normalizes_backslashes() {
-        let fake = StudioSync {
-            identifier: ".tungsten_proj".to_string(),
-            sync_path: PathBuf::from("/fake"),
-        };
-        assert_eq!(
-            fake.asset_uri("icons\\arrow.png"),
-            "rbxasset://.tungsten_proj/icons/arrow.png"
-        );
     }
 }

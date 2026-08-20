@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 #[allow(unused_imports)]
 use tempfile::tempdir;
 
@@ -11,6 +13,9 @@ use tempfile::tempdir;
 /// for assets that have never been uploaded.
 pub struct DebugSync {
     sync_path: PathBuf,
+    /// Directories already ensured to exist, to skip the `create_dir_all`
+    /// syscall for subsequent assets in the same folder.
+    created_dirs: Mutex<HashSet<PathBuf>>,
 }
 
 impl DebugSync {
@@ -25,20 +30,30 @@ impl DebugSync {
 
         std::fs::create_dir_all(&sync_path).context("Failed to create .tungsten_debug folder")?;
 
-        Ok(Self { sync_path })
+        Ok(Self {
+            sync_path,
+            created_dirs: Mutex::new(HashSet::new()),
+        })
     }
 
     /// Copy an asset into `.tungsten_debug/`, preserving its relative path.
     pub fn copy_asset(&self, relative_path: &str, data: &[u8]) -> Result<()> {
         let rel = relative_path.replace('\\', "/");
-        let target = self
-            .sync_path
-            .join(Path::new(&rel.replace('/', std::path::MAIN_SEPARATOR_STR)));
+        // Build the target path component-by-component, avoiding intermediate
+        // String allocations from a separator replace.
+        let mut target = self.sync_path.clone();
+        for part in rel.split('/') {
+            target.push(part);
+        }
 
         if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).with_context(|| {
-                format!("Failed to create directory for \"{}\"", target.display())
-            })?;
+            let mut created = self.created_dirs.lock().unwrap();
+            if !created.contains(parent) {
+                std::fs::create_dir_all(parent).with_context(|| {
+                    format!("Failed to create directory for \"{}\"", target.display())
+                })?;
+                created.insert(parent.to_path_buf());
+            }
         }
 
         std::fs::write(&target, data)
@@ -49,6 +64,16 @@ impl DebugSync {
 
     pub fn sync_path(&self) -> &Path {
         &self.sync_path
+    }
+
+    /// Construct a `DebugSync` rooted at an arbitrary path. Test-only: lets
+    /// unit tests point a debug target at a temp dir instead of `.tungsten_debug/`.
+    #[cfg(test)]
+    pub fn with_path(path: PathBuf) -> Self {
+        Self {
+            sync_path: path,
+            created_dirs: Mutex::new(HashSet::new()),
+        }
     }
 }
 
@@ -61,6 +86,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let sync = DebugSync {
             sync_path: dir.path().to_path_buf(),
+            created_dirs: Mutex::new(HashSet::new()),
         };
         sync.copy_asset("icons/arrow.png", b"fake-png-data")
             .unwrap();
