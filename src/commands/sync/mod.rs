@@ -1,5 +1,8 @@
 pub mod codegen_write;
+pub mod dispatch;
+pub mod dpi;
 pub mod encode;
+pub mod error;
 pub mod individual;
 pub mod packed;
 pub mod paths;
@@ -7,6 +10,7 @@ pub mod raw;
 
 use std::collections::HashSet;
 use std::fs;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
@@ -15,8 +19,8 @@ use crate::api::sync::debug::DebugSync;
 use crate::api::sync::roblox::{Creator, GroupCreator, UserCreator};
 use crate::api::sync::studio::StudioSync;
 use crate::api::upload::RobloxClient;
-use crate::core::assets::asset;
-use crate::core::assets::img::{convert, pack};
+use crate::core::assets::asset::{self, stem_name};
+use crate::core::assets::img::pack;
 use crate::core::postsync::lockfile::Lockfile;
 use crate::log;
 use crate::utils::config::Config;
@@ -30,7 +34,7 @@ use raw::process_raw;
 
 // Target
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum Target {
     /// Upload to Roblox Open Cloud API.
     Cloud,
@@ -38,20 +42,6 @@ pub enum Target {
     Studio,
     /// Copy assets into `.tungsten-debug/` for local inspection.
     Debug,
-}
-
-impl Target {
-    pub fn parse(s: &str) -> Result<Self> {
-        match s.to_ascii_lowercase().as_str() {
-            "cloud" => Ok(Target::Cloud),
-            "studio" => Ok(Target::Studio),
-            "debug" => Ok(Target::Debug),
-            other => bail!(
-                "Unknown target \"{}\"\n  Hint: Valid targets are cloud, studio, debug",
-                other
-            ),
-        }
-    }
 }
 
 /// Resolves the asset type override for upload.
@@ -67,8 +57,8 @@ fn resolve_asset_type_override(asset_type: Option<&str>) -> Option<&str> {
 // Entry point
 
 pub async fn run(
-    config: Config,
-    api_key: Option<String>,
+    config: &Config,
+    api_key: Option<&str>,
     target: Target,
     dry_run: bool,
 ) -> Result<()> {
@@ -105,7 +95,7 @@ pub async fn run(
             .as_ref()
             .map(|s| s.auto_route_version)
             .unwrap_or(false);
-        match StudioSync::new(studio_path, auto_route_version) {
+        match StudioSync::new(studio_path, auto_route_version).await {
             Ok(s) => {
                 log!(info, "Studio sync folder: {}", s.sync_path().display());
                 Some(Arc::new(s))
@@ -141,25 +131,17 @@ pub async fn run(
         None
     };
 
-    let creator = make_creator(&config)?;
+    let creator = make_creator(config)?;
 
-    let codegen_style = config
-        .codegen
-        .as_ref()
-        .and_then(|c| c.style.as_deref())
-        .unwrap_or("flat")
-        .to_string();
-
-    let strip_extension = config
-        .codegen
-        .as_ref()
-        .and_then(|c| c.strip_extension)
+    let codegen_cfg = config.codegen.as_ref();
+    let codegen_style = codegen_cfg
+        .map(|c| c.resolved_style().to_string())
+        .unwrap_or_else(|| "flat".to_string());
+    let strip_extension = codegen_cfg
+        .map(|c| c.resolved_strip_extension())
         .unwrap_or(false);
-
-    let ts_declaration = config
-        .codegen
-        .as_ref()
-        .and_then(|c| c.ts_declaration)
+    let ts_declaration = codegen_cfg
+        .map(|c| c.resolved_ts_declaration())
         .unwrap_or(false);
 
     let max_concurrent_uploads = config.max_concurrent_uploads;
@@ -232,81 +214,94 @@ pub async fn run(
 
         // Image assets
         if !image_paths.is_empty() {
-            let (svg_paths, raster_paths): (Vec<_>, Vec<_>) = image_paths.iter().partition(|p| {
-                p.extension()
-                    .and_then(|e| e.to_str())
-                    .map(|e| e.eq_ignore_ascii_case("svg"))
-                    .unwrap_or(false)
-            });
+            let (svg_paths, raster_paths): (Vec<&PathBuf>, Vec<&PathBuf>) =
+                image_paths.iter().partition(|p| {
+                    p.extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| e.eq_ignore_ascii_case("svg"))
+                        .unwrap_or(false)
+                });
+            let svg_paths_owned: Vec<PathBuf> = svg_paths.into_iter().cloned().collect();
+            let raster_paths_owned: Vec<PathBuf> = raster_paths.into_iter().cloned().collect();
 
-            // Rasterize SVGs in parallel.
+            // Rasterize SVGs in parallel (offloaded to blocking pool).
             let svg_images: Vec<pack::InputImage> = {
-                use rayon::prelude::*;
                 let base = base_path.clone();
-                let svg_total = svg_paths.len();
-                let counter = std::sync::atomic::AtomicUsize::new(0);
-                svg_paths
-                    .par_iter()
-                    .filter_map(|path| {
-                        let data = std::fs::read(path).ok()?;
-                        let name = path
-                            .strip_prefix(&base)
-                            .unwrap_or(path)
-                            .with_extension("")
-                            .to_string_lossy()
-                            .replace('\\', "/");
-                        let scale = input.effective_svg_scale(path, &base);
-                        let png_bytes = convert::svg_to_png(&data, scale)
-                            .map_err(|e| {
-                                clear_progress_line();
-                                log!(warn, "Failed to rasterize \"{}\": {}", path.display(), e);
-                                e
-                            })
-                            .ok()?;
-                        let image = image::load_from_memory(&png_bytes)
-                            .map_err(|e| {
-                                clear_progress_line();
-                                log!(
-                                    warn,
-                                    "Failed to decode rasterized SVG \"{}\": {}",
-                                    path.display(),
+                let svg_paths_vec = svg_paths_owned.clone();
+                let svg_scale_opt = input.svg_scale;
+                let base_path_str = base_path.to_string();
+                // Shared `.tmeta` read cache so each directory's metadata file
+                // is parsed once instead of once per SVG.
+                let svg_scale_cache =
+                    std::sync::Arc::new(crate::utils::config::new_svg_scale_cache());
+
+                tokio::task::spawn_blocking(move || {
+                    use rayon::prelude::*;
+                    let svg_total = svg_paths_vec.len();
+                    let counter = std::sync::atomic::AtomicUsize::new(0);
+                    svg_paths_vec
+                        .par_iter()
+                        .filter_map(|path| {
+                            let data = std::fs::read(path).ok()?;
+                            let rel = path.strip_prefix(&base).unwrap_or(path).to_string_lossy();
+                            let name = stem_name(&rel);
+                            // Compute effective SVG scale (reads .tmeta files)
+                            let scale = crate::utils::config::InputConfig::effective_svg_scale_for_path(
+                                path,
+                                &base_path_str,
+                                svg_scale_opt,
+                                &svg_scale_cache,
+                            );
+                            // Rasterize straight to RGBA, skipping a PNG roundtrip.
+                            let image = crate::core::assets::img::convert::svg_to_rgba(&data, scale)
+                                .map_err(|e| {
+                                    clear_progress_line();
+                                    log!(warn, "Failed to rasterize \"{}\": {}", path.display(), e);
                                     e
-                                );
-                                e
+                                })
+                                .ok()?;
+                            let done = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                            progress("Rasterizing", done, svg_total, &name);
+                            Some(pack::InputImage {
+                                name: name.to_string(),
+                                image,
                             })
-                            .ok()?
-                            .into_rgba8();
-                        let done = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                        progress("Rasterizing", done, svg_total, &name);
-                        Some(pack::InputImage {
-                            name: name.to_string(),
-                            image,
                         })
-                    })
-                    .collect()
+                        .collect()
+                })
+                .await
+                .expect("spawn_blocking panicked")
             };
-
-            let raster: Vec<_> = raster_paths.into_iter().cloned().collect();
-            let mut images = match pack::load_images(raster, &base_path) {
-                Ok(imgs) => imgs,
-                Err(e) => {
-                    log!(warn, "Failed to load images for \"{}\": {}", input_name, e);
-                    total_errors += 1;
-                    continue;
-                }
-            };
-            images.extend(svg_images);
-
-            if images.is_empty() {
-                log!(
-                    warn,
-                    "No images could be loaded for \"{}\" — skipping",
-                    input_name
-                );
-                continue;
-            }
 
             let errs = if input.packable.unwrap_or(false) {
+                // Packed: every image must be decoded up front for bin-packing
+                // and atlas compositing (decode concurrency is chunk-bounded in
+                // `pack::load_images`).
+                let base_path_owned = base_path.to_string();
+                let mut images = match tokio::task::spawn_blocking(move || {
+                    pack::load_images(raster_paths_owned, &base_path_owned)
+                })
+                .await
+                .expect("spawn_blocking panicked")
+                {
+                    Ok(imgs) => imgs,
+                    Err(e) => {
+                        log!(warn, "Failed to load images for \"{}\": {}", input_name, e);
+                        total_errors += 1;
+                        continue;
+                    }
+                };
+                images.extend(svg_images);
+
+                if images.is_empty() {
+                    log!(
+                        warn,
+                        "No images could be loaded for \"{}\" — skipping",
+                        input_name
+                    );
+                    continue;
+                }
+
                 let sheet_meta = load_input_meta(&base_path);
                 let asset_type_override = resolve_asset_type_override(input.asset_type.as_deref());
                 process_packed(
@@ -334,12 +329,23 @@ pub async fn run(
                 )
                 .await
             } else {
+                // Individual: raster files are decoded lazily inside the
+                // processing loop so memory stays bounded by processing
+                // concurrency instead of holding every decoded image at once.
+                if svg_images.is_empty() && raster_paths_owned.is_empty() {
+                    log!(
+                        warn,
+                        "No images could be loaded for \"{}\" — skipping",
+                        input_name
+                    );
+                    continue;
+                }
                 let asset_type_override = resolve_asset_type_override(input.asset_type.as_deref());
                 process_individual(
                     input_name,
-                    images,
-                    image_paths,
-                    0.0, // svg_scale unused; per-file scale handled above
+                    svg_images,
+                    svg_paths_owned,
+                    raster_paths_owned,
                     &base_path,
                     &input.output_path,
                     &codegen_style,
