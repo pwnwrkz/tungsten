@@ -141,7 +141,8 @@ pub async fn process_packed(
                             alpha_bleed(&mut sheet_image);
                         }
                         let png_bytes: Vec<u8> = encode_png(&sheet_image)?;
-                        let png_bytes: Vec<u8> = maybe_compress_png(png_bytes, compress_opts.as_ref());
+                        let png_bytes: Vec<u8> =
+                            maybe_compress_png(png_bytes, compress_opts.as_ref());
                         let hash: String = hash_image(&png_bytes);
                         Ok(ProcessedSheet {
                             bytes: png_bytes,

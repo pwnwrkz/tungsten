@@ -121,8 +121,7 @@ async fn run(cli: Cli, is_syncing: Option<Arc<AtomicBool>>) -> anyhow::Result<()
         }
         Commands::Watch { target, api_key } => {
             let config = config::load("tungsten.toml")?;
-            let is_syncing =
-                is_syncing.expect("is_syncing must be provided for the Watch command");
+            let is_syncing = is_syncing.expect("is_syncing must be provided for the Watch command");
             commands::watch::run(config, api_key, target, is_syncing).await
         }
         Commands::Init => commands::init::run(),

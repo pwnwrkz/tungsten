@@ -28,7 +28,10 @@ impl StudioSync {
     /// https://setup.roblox.com/versionQTStudio and appended to the path.
     /// Does not wipe previous contents to allow incremental sync and preserve
     /// assets between Studio version updates.
-    pub async fn new(studio_path_override: Option<String>, auto_route_version: bool) -> Result<Self> {
+    pub async fn new(
+        studio_path_override: Option<String>,
+        auto_route_version: bool,
+    ) -> Result<Self> {
         let base_path = if let Some(path) = studio_path_override {
             PathBuf::from(path)
         } else {

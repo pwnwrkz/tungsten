@@ -24,9 +24,7 @@ use crate::utils::logger::clear_progress_line;
 
 use super::Target;
 use super::codegen_write::{seed_web_assets, write_codegen};
-use super::dispatch::{
-    collect_upload_results, dispatch_asset, DispatchCtx, PendingAsset,
-};
+use super::dispatch::{DispatchCtx, PendingAsset, collect_upload_results, dispatch_asset};
 use super::dpi::process_dpi_groups;
 use super::encode::{encode_png, group_dpi_variants, group_paths_by_dpi};
 use super::error::ProcessingError;
@@ -62,7 +60,10 @@ struct ProcessImageCtx<'a> {
 
 /// Process a single image for individual asset processing (synchronous version for parallel processing)
 #[inline]
-fn process_single_image_sync(img: InputImage, ctx: &ProcessImageCtx<'_>) -> Result<Pending, ProcessingError> {
+fn process_single_image_sync(
+    img: InputImage,
+    ctx: &ProcessImageCtx<'_>,
+) -> Result<Pending, ProcessingError> {
     // O(1) lookup via the pre-built name→path index.
     let path = ctx
         .path_index
@@ -75,8 +76,9 @@ fn process_single_image_sync(img: InputImage, ctx: &ProcessImageCtx<'_>) -> Resu
     if ctx.bleed {
         alpha_bleed(&mut rgba);
     }
-    let bytes = encode_png(&rgba)
-        .map_err(|e| ProcessingError::new(anyhow::anyhow!("Failed to encode \"{}\": {}", img.name, e)))?;
+    let bytes = encode_png(&rgba).map_err(|e| {
+        ProcessingError::new(anyhow::anyhow!("Failed to encode \"{}\": {}", img.name, e))
+    })?;
 
     let bytes = maybe_compress_png(bytes, ctx.compress_options);
     let hash = hash_image(&bytes);
@@ -172,7 +174,14 @@ pub async fn process_individual(
                 .into_par_iter()
                 .filter_map(|(base, scale, path)| {
                     let image = image::open(&path).ok()?.into_rgba8();
-                    Some((base, scale, InputImage { name: String::new(), image }))
+                    Some((
+                        base,
+                        scale,
+                        InputImage {
+                            name: String::new(),
+                            image,
+                        },
+                    ))
                 })
                 .collect()
         })
@@ -191,7 +200,11 @@ pub async fn process_individual(
     let plain_sources: Vec<PlainSource> = svg_plain
         .into_iter()
         .map(PlainSource::Decoded)
-        .chain(raster_plain.into_iter().map(|(path, _)| PlainSource::Path(path)))
+        .chain(
+            raster_plain
+                .into_iter()
+                .map(|(path, _)| PlainSource::Path(path)),
+        )
         .collect();
 
     // Process plain images in parallel for CPU-bound operations (offloaded to

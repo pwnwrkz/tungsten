@@ -246,21 +246,29 @@ pub async fn run(
                             let rel = path.strip_prefix(&base).unwrap_or(path).to_string_lossy();
                             let name = stem_name(&rel);
                             // Compute effective SVG scale (reads .tmeta files)
-                            let scale = crate::utils::config::InputConfig::effective_svg_scale_for_path(
-                                path,
-                                &base_path_str,
-                                svg_scale_opt,
-                                &svg_scale_cache,
-                            );
+                            let scale =
+                                crate::utils::config::InputConfig::effective_svg_scale_for_path(
+                                    path,
+                                    &base_path_str,
+                                    svg_scale_opt,
+                                    &svg_scale_cache,
+                                );
                             // Rasterize straight to RGBA, skipping a PNG roundtrip.
-                            let image = crate::core::assets::img::convert::svg_to_rgba(&data, scale)
-                                .map_err(|e| {
-                                    clear_progress_line();
-                                    log!(warn, "Failed to rasterize \"{}\": {}", path.display(), e);
-                                    e
-                                })
-                                .ok()?;
-                            let done = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                            let image =
+                                crate::core::assets::img::convert::svg_to_rgba(&data, scale)
+                                    .map_err(|e| {
+                                        clear_progress_line();
+                                        log!(
+                                            warn,
+                                            "Failed to rasterize \"{}\": {}",
+                                            path.display(),
+                                            e
+                                        );
+                                        e
+                                    })
+                                    .ok()?;
+                            let done =
+                                counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                             progress("Rasterizing", done, svg_total, &name);
                             Some(pack::InputImage {
                                 name: name.to_string(),

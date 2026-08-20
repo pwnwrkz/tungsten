@@ -48,7 +48,8 @@ impl RobloxClient {
         let mut default_headers = reqwest::header::HeaderMap::new();
         default_headers.insert(
             "x-api-key",
-            reqwest::header::HeaderValue::from_str(&api_key).expect("API key must be a valid header value"),
+            reqwest::header::HeaderValue::from_str(&api_key)
+                .expect("API key must be a valid header value"),
         );
 
         let client = Client::builder()
@@ -227,10 +228,8 @@ impl RobloxClient {
                 StatusCode::TOO_MANY_REQUESTS if attempt < MAX_RETRIES => {
                     let wait = rate_limit_wait(&response, attempt);
                     log!(warn, "Rate limited, retrying in {:.2}s", wait.as_secs_f64());
-                    self.rate_limit_reset.store(
-                        unix_millis() + wait.as_millis() as u64,
-                        Ordering::Release,
-                    );
+                    self.rate_limit_reset
+                        .store(unix_millis() + wait.as_millis() as u64, Ordering::Release);
                     self.sleep_or_cancel(wait).await;
                     attempt += 1;
                 }
@@ -238,7 +237,12 @@ impl RobloxClient {
                 // 5xx server errors are transient — retry with backoff.
                 s if s.is_server_error() && attempt < MAX_RETRIES => {
                     let wait = backoff(attempt);
-                    log!(warn, "Server error {}, retrying in {:.2}s", s, wait.as_secs_f64());
+                    log!(
+                        warn,
+                        "Server error {}, retrying in {:.2}s",
+                        s,
+                        wait.as_secs_f64()
+                    );
                     self.sleep_or_cancel(wait).await;
                     attempt += 1;
                 }
@@ -265,7 +269,8 @@ impl RobloxClient {
         let now = unix_millis();
         let reset = self.rate_limit_reset.load(Ordering::Acquire);
         if reset > now {
-            self.sleep_or_cancel(Duration::from_millis(reset - now)).await;
+            self.sleep_or_cancel(Duration::from_millis(reset - now))
+                .await;
         }
     }
 
@@ -380,7 +385,8 @@ mod tests {
     fn rate_limit_wait_falls_back_to_backoff_without_header() {
         // A bare 429 response with no reset header falls back to backoff
         // (2^2 = 4s), jittered ±10% => 3600..4400ms.
-        let response = reqwest::Response::from(HttpResponse::builder().status(429).body("").unwrap());
+        let response =
+            reqwest::Response::from(HttpResponse::builder().status(429).body("").unwrap());
         let wait = rate_limit_wait(&response, 2);
         let ms = wait.as_millis();
         assert!((3600..=4400).contains(&ms), "got {}ms", ms);

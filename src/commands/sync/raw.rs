@@ -25,7 +25,7 @@ use crate::utils::logger::clear_progress_line;
 
 use super::Target;
 use super::codegen_write::{seed_web_assets, write_codegen};
-use super::dispatch::{collect_upload_results, dispatch_asset, DispatchCtx, PendingAsset};
+use super::dispatch::{DispatchCtx, PendingAsset, collect_upload_results, dispatch_asset};
 use super::error::ProcessingError;
 use super::paths::relative_path;
 
@@ -150,7 +150,6 @@ fn process_single_raw_file(
     })
 }
 
-
 #[allow(clippy::too_many_arguments)]
 pub async fn process_raw(
     input_name: &str,
@@ -188,7 +187,9 @@ pub async fn process_raw(
         tokio::task::spawn_blocking(move || {
             paths_vec
                 .into_par_iter()
-                .map(|path| process_single_raw_file(&path, &base_path_owned, compress_opts.as_ref()))
+                .map(|path| {
+                    process_single_raw_file(&path, &base_path_owned, compress_opts.as_ref())
+                })
                 .collect::<Vec<_>>()
         })
         .await

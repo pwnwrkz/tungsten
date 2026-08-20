@@ -93,13 +93,15 @@ fn run_alpha_bleed(img: &mut RgbaImage, b: &mut BleedBuffers) {
     b.next_wave.clear();
     b.written_this_wave.clear();
     if b.current_wave.capacity() < wave_capacity {
-        b.current_wave.reserve(wave_capacity - b.current_wave.capacity());
+        b.current_wave
+            .reserve(wave_capacity - b.current_wave.capacity());
     }
     if b.next_wave.capacity() < wave_capacity {
         b.next_wave.reserve(wave_capacity - b.next_wave.capacity());
     }
     if b.written_this_wave.capacity() < wave_capacity {
-        b.written_this_wave.reserve(wave_capacity - b.written_this_wave.capacity());
+        b.written_this_wave
+            .reserve(wave_capacity - b.written_this_wave.capacity());
     }
 
     let pixels = img.as_raw();

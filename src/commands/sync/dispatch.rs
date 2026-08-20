@@ -170,7 +170,11 @@ pub struct DispatchCtx<'a, 'b, 'c> {
 /// Studio/Debug copies, lockfile cache hits and cloud upload spawning. Pushes
 /// the resulting codegen entry (or, for cloud uploads, defers it until the
 /// upload completes and `collect_upload_results` runs).
-pub fn dispatch_asset(asset: PendingAsset, ctx: &mut DispatchCtx<'_, '_, '_>, codegen_entries: &mut Vec<CodegenEntry>) {
+pub fn dispatch_asset(
+    asset: PendingAsset,
+    ctx: &mut DispatchCtx<'_, '_, '_>,
+    codegen_entries: &mut Vec<CodegenEntry>,
+) {
     if ctx.dry_run {
         *ctx.dispatched += 1;
         progress("Uploading", *ctx.dispatched, ctx.total, asset.name.as_str());
@@ -198,7 +202,8 @@ pub fn dispatch_asset(asset: PendingAsset, ctx: &mut DispatchCtx<'_, '_, '_>, co
                         return;
                     }
                 };
-                ctx.lockfile.set_uri(ctx.input_name, asset.hash, uri.clone());
+                ctx.lockfile
+                    .set_uri(ctx.input_name, asset.hash, uri.clone());
                 progress("Copying", *ctx.dispatched, ctx.total, asset.name.as_str());
                 codegen_entries.push(CodegenEntry::asset(asset.name, codegen::AssetRef::Uri(uri)));
                 return;
@@ -218,7 +223,8 @@ pub fn dispatch_asset(asset: PendingAsset, ctx: &mut DispatchCtx<'_, '_, '_>, co
                     return;
                 }
             };
-            ctx.lockfile.set_uri(ctx.input_name, asset.hash, uri.clone());
+            ctx.lockfile
+                .set_uri(ctx.input_name, asset.hash, uri.clone());
             progress("Copying", *ctx.dispatched, ctx.total, asset.name.as_str());
             codegen_entries.push(CodegenEntry::asset(asset.name, codegen::AssetRef::Uri(uri)));
         }
