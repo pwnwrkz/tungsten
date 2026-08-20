@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
+use bytes::Bytes;
 use rayon::prelude::*;
 use relative_path::RelativePathBuf;
 use tokio::sync::Semaphore;
@@ -11,17 +12,21 @@ use tokio::task::JoinSet;
 use crate::api::sync::debug::DebugSync;
 use crate::api::sync::roblox::Creator;
 use crate::api::sync::studio::StudioSync;
-use crate::api::upload::{RobloxClient, UploadParams};
-use crate::core::assets::asset::{self, AssetKind, AssetMeta, WebAsset, is_animation_file};
-use crate::core::assets::img::compress::CompressOptions;
+use crate::api::upload::RobloxClient;
+use crate::core::assets::asset::{
+    self, AssetKind, AssetMeta, WebAsset, is_animation_file, stem_name,
+};
+use crate::core::assets::img::compress::{CompressOptions, compress_image};
 use crate::core::assets::img::convert;
-use crate::core::postsync::codegen::{self, CodegenEntry};
+use crate::core::postsync::codegen::CodegenEntry;
 use crate::core::postsync::lockfile::{Lockfile, hash_image};
 use crate::log;
-use crate::utils::logger::{clear_progress_line, progress};
+use crate::utils::logger::clear_progress_line;
 
 use super::Target;
 use super::codegen_write::{seed_web_assets, write_codegen};
+use super::dispatch::{collect_upload_results, dispatch_asset, DispatchCtx, PendingAsset};
+use super::error::ProcessingError;
 use super::paths::relative_path;
 
 pub struct RawPending {
@@ -45,17 +50,35 @@ fn maybe_compress(
     let Some(opts) = compress_options else {
         return bytes;
     };
-    match convert::normalize_for_compression(bytes.clone(), ext) {
-        Ok((normalized, norm_ext)) => {
-            match crate::core::assets::img::compress::compress_image(&normalized, norm_ext, opts) {
-                Ok(compressed) => compressed,
-                Err(e) => {
-                    clear_progress_line();
-                    log!(warn, "Compression failed, using original: {}", e);
-                    bytes
-                }
+
+    // Common case: format already caesium-compatible (PNG/JPG/...). Compress
+    // in place — no clone, `bytes` stays owned for the fallback.
+    let ext_lower = ext.to_ascii_lowercase();
+    if convert::is_caesium_compatible(&ext_lower) {
+        return match compress_image(&bytes, &ext_lower, opts) {
+            Ok(Some(compressed)) => compressed,
+            Ok(None) => bytes,
+            Err(e) => {
+                clear_progress_line();
+                log!(warn, "Compression failed, using original: {}", e);
+                bytes
             }
-        }
+        };
+    }
+
+    // Rare path (BMP/TGA/...): transcode to PNG first. Clone so the original
+    // survives if transcoding itself fails — returning empty bytes here would
+    // upload a corrupt asset.
+    match convert::normalize_for_compression(bytes.clone(), ext) {
+        Ok((normalized, norm_ext)) => match compress_image(&normalized, norm_ext, opts) {
+            Ok(Some(compressed)) => compressed,
+            Ok(None) => normalized,
+            Err(e) => {
+                clear_progress_line();
+                log!(warn, "Compression failed, using original: {}", e);
+                normalized
+            }
+        },
         Err(e) => {
             clear_progress_line();
             log!(warn, "Could not normalize for compression: {}", e);
@@ -72,9 +95,12 @@ fn process_single_raw_file(
     compress_options: Option<&CompressOptions>,
 ) -> Result<RawPending, ProcessingError> {
     // Read the file
-    let data = std::fs::read(path).map_err(|e| ProcessingError {
-        name: path.display().to_string(),
-        error: anyhow::anyhow!("Failed to read \"{}\": {}", path.display(), e),
+    let data = std::fs::read(path).map_err(|e| {
+        ProcessingError::new(anyhow::anyhow!(
+            "Failed to read \"{}\": {}",
+            path.display(),
+            e
+        ))
     })?;
 
     let src_ext = path
@@ -99,23 +125,17 @@ fn process_single_raw_file(
             }
         }
         None => {
-            return Err(ProcessingError {
-                name: path.display().to_string(),
-                error: anyhow::anyhow!("Unsupported extension \"{}\"", src_ext),
-            });
+            return Err(ProcessingError::new(anyhow::anyhow!(
+                "Unsupported extension \"{}\"",
+                src_ext
+            )));
         }
     };
 
     let data = maybe_compress(data, &src_ext, compress_options);
     let hash = hash_image(&data);
     let meta = AssetMeta::load_for(path).unwrap_or_default();
-    let name = {
-        let rel = relative_path(path, base_path);
-        Path::new(&rel)
-            .with_extension("")
-            .to_string_lossy()
-            .replace('\\', "/")
-    };
+    let name = stem_name(&relative_path(path, base_path));
     let display_name = meta.resolve_name(&name).to_string();
     let description = meta.resolve_description("Uploaded by Tungsten").to_string();
 
@@ -130,12 +150,6 @@ fn process_single_raw_file(
     })
 }
 
-/// Error type for asset processing failures
-#[derive(Debug)]
-struct ProcessingError {
-    name: String,
-    error: anyhow::Error,
-}
 
 #[allow(clippy::too_many_arguments)]
 pub async fn process_raw(
@@ -163,11 +177,22 @@ pub async fn process_raw(
     let mut codegen_entries: Vec<CodegenEntry> = Vec::new();
     seed_web_assets(web_assets, base_path, strip_extension, &mut codegen_entries);
 
-    // Process files in parallel
-    let pending_results: Vec<Result<RawPending, ProcessingError>> = paths
-        .into_par_iter()
-        .map(|path| process_single_raw_file(&path, base_path, compress_options))
-        .collect::<Vec<_>>();
+    // Process files in parallel (offloaded to blocking pool)
+    let base_path_owned = base_path.to_string();
+    // Owned copy so the `'static` blocking closure doesn't capture a borrowed
+    // reference into the async context.
+    let compress_opts = compress_options.cloned();
+    let paths_vec = paths;
+
+    let pending_results: Vec<Result<RawPending, ProcessingError>> =
+        tokio::task::spawn_blocking(move || {
+            paths_vec
+                .into_par_iter()
+                .map(|path| process_single_raw_file(&path, &base_path_owned, compress_opts.as_ref()))
+                .collect::<Vec<_>>()
+        })
+        .await
+        .expect("spawn_blocking panicked");
 
     // Collect results and count errors
     let mut pending: Vec<RawPending> = Vec::new();
@@ -177,7 +202,7 @@ pub async fn process_raw(
             Ok(p) => pending.push(p),
             Err(e) => {
                 clear_progress_line();
-                log!(warn, "Failed to prepare file \"{}\": {}", e.name, e.error);
+                log!(warn, "{}", e.error);
                 errors += 1;
             }
         }
@@ -191,167 +216,73 @@ pub async fn process_raw(
     let mut upload_tasks: JoinSet<Result<(String, u64, String)>> = JoinSet::new();
     let mut dispatched = 0usize;
 
-    for p in &pending {
-        if dry_run {
-            dispatched += 1;
-            progress("Uploading", dispatched, total, p.name.as_str());
-            codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), 0));
-            continue;
-        }
+    // Unified dispatch: dry-run, Studio/Debug copies, cache hits and cloud
+    // uploads are handled identically to `individual` (see `dispatch::dispatch_asset`).
+    {
+        let mut dispatch_ctx = DispatchCtx {
+            input_name,
+            target,
+            dry_run,
+            creator,
+            client,
+            studio_sync,
+            debug_sync,
+            lockfile,
+            studio_expected_files,
+            upload_tasks: &mut upload_tasks,
+            semaphore: &semaphore,
+            total,
+            dispatched: &mut dispatched,
+            errors: &mut errors,
+        };
 
-        match target {
-            Target::Studio => {
-                // Models and Animations cannot be synced to Studio without prior upload
-                if matches!(p.kind, AssetKind::Model(_) | AssetKind::Animation) {
-                    dispatched += 1;
-                    let uri = match lockfile.get(input_name, &p.hash) {
-                        Some(cached_id) => format!("rbxassetid://{cached_id}"),
-                        None => {
-                            clear_progress_line();
-                            log!(
-                                warn,
-                                "Models and Animations cannot be synced to Studio without having been uploaded first: \"{}\"",
-                                p.name
-                            );
-                            errors += 1;
-                            continue;
-                        }
-                    };
-                    lockfile.set_uri(input_name, p.hash.clone(), uri.clone());
-                    progress("Copying", dispatched, total, p.name.as_str());
-                    codegen_entries.push(CodegenEntry::asset(
-                        p.name.clone(),
-                        codegen::AssetRef::Uri(uri),
-                    ));
-                } else {
-                    dispatched += 1;
-                    let ext = p.path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                    let rel = if ext.is_empty() {
-                        p.name.clone()
-                    } else {
-                        format!("{}.{}", p.name, ext)
-                    };
-                    let uri = if let Some(ss) = studio_sync {
-                        match ss.copy_asset(&rel, &p.bytes) {
-                            Ok(u) => {
-                                // Track expected file for Studio sync cleanup
-                                if let Some(ref mut set) = *studio_expected_files {
-                                    set.insert(rel.clone());
-                                }
-                                u
-                            }
-                            Err(e) => {
-                                clear_progress_line();
-                                log!(warn, "Studio copy failed for \"{}\": {}", p.name, e);
-                                errors += 1;
-                                continue;
-                            }
-                        }
-                    } else {
-                        String::new()
-                    };
-                    lockfile.set_uri(input_name, p.hash.clone(), uri.clone());
-                    progress("Copying", dispatched, total, p.name.as_str());
-                    codegen_entries.push(CodegenEntry::asset(
-                        p.name.clone(),
-                        codegen::AssetRef::Uri(uri),
-                    ));
-                }
-            }
-            Target::Debug => {
-                dispatched += 1;
-                let rel = format!(
-                    "{}.{}",
-                    p.name,
-                    p.path.extension().and_then(|e| e.to_str()).unwrap_or("bin")
-                );
-                if let Some(ds) = debug_sync
-                    && let Err(e) = ds.copy_asset(&rel, &p.bytes)
-                {
-                    clear_progress_line();
-                    log!(warn, "Debug copy failed for \"{}\": {}", p.name, e);
-                    errors += 1;
-                    continue;
-                }
-                let fallback_id = lockfile.get(input_name, &p.hash).unwrap_or(0);
-                progress("Copying", dispatched, total, p.name.as_str());
-                codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), fallback_id));
-            }
-            Target::Cloud => {
-                if let Some(cached_id) = lockfile.get(input_name, &p.hash) {
-                    clear_progress_line();
-                    log!(
-                        debug,
-                        "{}: unchanged, skipping (cached asset {})",
-                        p.name,
-                        cached_id
-                    );
-                    dispatched += 1;
-                    progress("Uploading", dispatched, total, p.name.as_str());
-                    codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), cached_id));
-                    continue;
-                }
-                let Some(c) = client else {
-                    codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), 0));
-                    continue;
-                };
-                let c_arc = Arc::clone(c);
-                let creator_own = creator.clone();
-                let p_path = p.path.clone();
-                let p_name = p.name.clone();
-                let p_hash = p.hash.clone();
-                let p_display_name = p.display_name.clone();
-                let p_description = p.description.clone();
-                let p_bytes = p.bytes.clone();
-                let p_kind = p.kind;
-                let asset_type_override = asset_type.map(|s| s.to_string());
-                let semaphore_clone = semaphore.clone();
-                upload_tasks.spawn(async move {
-                    let _permit = semaphore_clone.acquire_owned().await;
-                    let file_name = p_path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned();
-                    let id = c_arc
-                        .upload(UploadParams {
-                            file_name,
-                            display_name: p_display_name.clone(),
-                            description: p_description.clone(),
-                            data: p_bytes.clone(),
-                            kind: p_kind,
-                            asset_type_override: asset_type_override.clone(),
-                            creator: creator_own,
-                        })
-                        .await
-                        .with_context(|| format!("Failed to upload \"{}\"", p_name.clone()))?;
-                    Ok((p_name.clone(), id, p_hash.clone()))
-                });
-            }
+        for p in pending {
+            let ext = p.path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            let studio_needs_upload = matches!(p.kind, AssetKind::Model(_) | AssetKind::Animation);
+            let studio_rel = if studio_needs_upload {
+                String::new()
+            } else if ext.is_empty() {
+                p.name.clone()
+            } else {
+                format!("{}.{}", p.name, ext)
+            };
+            let debug_rel = if ext.is_empty() {
+                format!("{}.bin", p.name)
+            } else {
+                format!("{}.{}", p.name, ext)
+            };
+
+            dispatch_asset(
+                PendingAsset {
+                    name: p.name,
+                    path: p.path,
+                    bytes: Bytes::from(p.bytes),
+                    hash: p.hash,
+                    kind: p.kind,
+                    display_name: p.display_name,
+                    description: p.description,
+                    asset_type_override: asset_type.map(|s| s.to_string()),
+                    studio_rel,
+                    debug_rel,
+                    studio_needs_upload,
+                },
+                &mut dispatch_ctx,
+                &mut codegen_entries,
+            );
         }
     }
 
-    let mut completed = 0usize;
-    while let Some(res) = upload_tasks.join_next().await {
-        completed += 1;
-        match res {
-            Ok(Ok((name, id, hash))) => {
-                lockfile.set(input_name, hash, id);
-                progress("Uploading", dispatched + completed, total, &name);
-                codegen_entries.push(CodegenEntry::asset_id(name.to_string(), id));
-            }
-            Ok(Err(e)) => {
-                clear_progress_line();
-                log!(warn, "{}", e);
-                errors += 1;
-            }
-            Err(e) => {
-                clear_progress_line();
-                log!(warn, "Upload task panicked: {}", e);
-                errors += 1;
-            }
-        }
-    }
+    // Cloud upload results
+    collect_upload_results(
+        &mut upload_tasks,
+        input_name,
+        lockfile,
+        &mut codegen_entries,
+        total,
+        dispatched,
+        &mut errors,
+    )
+    .await;
 
     write_codegen(
         codegen_entries,
@@ -363,4 +294,33 @@ pub async fn process_raw(
         &mut errors,
     );
     errors
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression: `maybe_compress` must never return empty bytes when
+    /// normalization fails — that would upload a corrupt/empty asset.
+    #[test]
+    fn maybe_compress_preserves_bytes_when_normalize_fails() {
+        let bytes = vec![1u8, 2, 3, 4, 5];
+        // "svg" is not caesium-compatible and cannot be transcoded by the
+        // image crate, so normalize_for_compression returns Err.
+        // The original bytes must survive for the error fallback.
+        let out = maybe_compress(bytes.clone(), "svg", Some(&CompressOptions::default()));
+        assert_eq!(
+            out, bytes,
+            "original bytes must be returned on normalize failure"
+        );
+    }
+
+    /// Compatible formats skip normalization entirely and keep the original
+    /// bytes when compression fails or produces no saving.
+    #[test]
+    fn maybe_compress_compatible_ext_never_empty() {
+        let bytes = vec![1u8, 2, 3, 4, 5, 6, 7, 8];
+        let out = maybe_compress(bytes.clone(), "png", Some(&CompressOptions::default()));
+        assert_eq!(out, bytes, "garbage PNG must fall back to original bytes");
+    }
 }

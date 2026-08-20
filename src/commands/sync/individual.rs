@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
+use bytes::Bytes;
 use rayon::prelude::*;
 use relative_path::RelativePathBuf;
 use tokio::sync::Semaphore;
@@ -11,18 +12,24 @@ use tokio::task::JoinSet;
 use crate::api::sync::debug::DebugSync;
 use crate::api::sync::roblox::Creator;
 use crate::api::sync::studio::StudioSync;
-use crate::api::upload::{RobloxClient, UploadParams};
-use crate::core::assets::asset::{AssetKind, AssetMeta, ImageFormat, WebAsset};
+use crate::api::upload::RobloxClient;
+use crate::core::assets::asset::{AssetKind, AssetMeta, ImageFormat, WebAsset, stem_name};
 use crate::core::assets::img::alpha_bleed::alpha_bleed;
 use crate::core::assets::img::compress::{CompressOptions, maybe_compress_png};
-use crate::core::postsync::codegen::{self, CodegenEntry};
+use crate::core::assets::img::pack::InputImage;
+use crate::core::postsync::codegen::CodegenEntry;
 use crate::core::postsync::lockfile::{Lockfile, hash_image};
 use crate::log;
-use crate::utils::logger::{clear_progress_line, progress};
+use crate::utils::logger::clear_progress_line;
 
 use super::Target;
-use super::codegen_write::write_codegen;
-use super::encode::{encode_png, group_dpi_variants};
+use super::codegen_write::{seed_web_assets, write_codegen};
+use super::dispatch::{
+    collect_upload_results, dispatch_asset, DispatchCtx, PendingAsset,
+};
+use super::dpi::process_dpi_groups;
+use super::encode::{encode_png, group_dpi_variants, group_paths_by_dpi};
+use super::error::ProcessingError;
 use super::paths::relative_path;
 
 struct Pending {
@@ -36,15 +43,18 @@ struct Pending {
     asset_type: Option<String>,
 }
 
-/// Error type for asset processing failures
-#[derive(Debug)]
-struct ProcessingError {
-    error: anyhow::Error,
+/// A plain (non-DPI) image source: either already decoded (SVG rasterization)
+/// or still on disk and decoded lazily inside the blocking pool so memory stays
+/// bounded by processing concurrency instead of holding every image at once.
+enum PlainSource {
+    Decoded(InputImage),
+    Path(PathBuf),
 }
 
 struct ProcessImageCtx<'a> {
-    paths: &'a [PathBuf],
-    base_path: &'a str,
+    /// Pre-built index: image name (relative stem) → absolute PathBuf.
+    /// Allows O(1) path lookup per image instead of an O(n) linear scan.
+    path_index: &'a HashMap<String, PathBuf>,
     compress_options: Option<&'a CompressOptions>,
     bleed: bool,
     asset_type: Option<&'a str>,
@@ -52,34 +62,21 @@ struct ProcessImageCtx<'a> {
 
 /// Process a single image for individual asset processing (synchronous version for parallel processing)
 #[inline]
-fn process_single_image_sync(
-    img: crate::core::assets::img::pack::InputImage,
-    ctx: &ProcessImageCtx<'_>,
-) -> Result<Pending, ProcessingError> {
-    // Find the actual file path for this image
+fn process_single_image_sync(img: InputImage, ctx: &ProcessImageCtx<'_>) -> Result<Pending, ProcessingError> {
+    // O(1) lookup via the pre-built name→path index.
     let path = ctx
-        .paths
-        .iter()
-        .find(|p| {
-            let rel = relative_path(p, ctx.base_path);
-            let rel_stem = Path::new(&rel)
-                .with_extension("")
-                .to_string_lossy()
-                .replace('\\', "/");
-            let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-            rel_stem == img.name || stem == img.name.rsplit('/').next().unwrap_or(&img.name)
-        })
+        .path_index
+        .get(&img.name)
         .cloned()
         .unwrap_or_else(|| PathBuf::from(&img.name));
 
     // Process the image: optionally alpha bleed, encode, compress, hash
-    let mut rgba = img.image.clone();
+    let mut rgba = img.image;
     if ctx.bleed {
         alpha_bleed(&mut rgba);
     }
-    let bytes = encode_png(&rgba).map_err(|e| ProcessingError {
-        error: anyhow::anyhow!("Failed to encode \"{}\": {}", img.name, e),
-    })?;
+    let bytes = encode_png(&rgba)
+        .map_err(|e| ProcessingError::new(anyhow::anyhow!("Failed to encode \"{}\": {}", img.name, e)))?;
 
     let bytes = maybe_compress_png(bytes, ctx.compress_options);
     let hash = hash_image(&bytes);
@@ -103,9 +100,9 @@ fn process_single_image_sync(
 #[allow(clippy::too_many_arguments)]
 pub async fn process_individual(
     input_name: &str,
-    images: Vec<crate::core::assets::img::pack::InputImage>,
-    image_paths: Vec<PathBuf>,
-    svg_scale: f32,
+    svg_images: Vec<InputImage>,
+    svg_paths: Vec<PathBuf>,
+    raster_paths: Vec<PathBuf>,
     base_path: &str,
     output_path: &str,
     codegen_style: &str,
@@ -126,32 +123,123 @@ pub async fn process_individual(
     web_assets: &HashMap<RelativePathBuf, WebAsset>,
 ) -> u32 {
     let mut errors: u32 = 0;
-    let total = images.len();
-    let _ = svg_scale;
+    let total = svg_images.len() + raster_paths.len();
 
     // Seed web assets into codegen entries first
     let mut codegen_entries: Vec<CodegenEntry> = Vec::new();
     seed_web_assets(web_assets, base_path, strip_extension, &mut codegen_entries);
 
-    let (dpi_groups, plain_images) = group_dpi_variants(images);
+    // Pre-build name→path index for O(1) meta lookups inside the parallel map
+    // (covers SVG paths and all raster files).
+    let mut path_index: HashMap<String, PathBuf> = HashMap::new();
+    for p in &svg_paths {
+        path_index.insert(stem_name(&relative_path(p, base_path)), p.clone());
+    }
+    for (path, name) in raster_paths
+        .iter()
+        .map(|p| (p.clone(), stem_name(&relative_path(p, base_path))))
+    {
+        path_index.insert(name, path);
+    }
 
-    // Process plain images in parallel for CPU-bound operations
-    let mut pending: Vec<Pending> = Vec::with_capacity(total);
-    let pending_results: Vec<Result<Pending, ProcessingError>> = plain_images
-        .into_par_iter()
-        .map(|img| {
-            let ctx = ProcessImageCtx {
-                paths: &image_paths,
-                base_path,
-                compress_options,
-                bleed,
-                asset_type,
-            };
-            process_single_image_sync(img, &ctx)
+    // Split SVG (decoded) and raster (on-disk) images into DPI groups and
+    // plain images. Raster DPI variants are few, so they're decoded eagerly;
+    // plain raster images are decoded lazily inside the blocking pool.
+    let (svg_dpi_groups, svg_plain) = group_dpi_variants(svg_images);
+    let (raster_dpi_groups, raster_plain) = group_paths_by_dpi(
+        raster_paths
+            .into_iter()
+            .map(|p| {
+                let name = stem_name(&relative_path(&p, base_path));
+                (p, name)
+            })
+            .collect(),
+    );
+
+    // Decode the (small number of) raster DPI variants off-thread and merge
+    // them into the SVG DPI groups.
+    let raster_dpi_flat: Vec<(String, u8, PathBuf)> = raster_dpi_groups
+        .into_iter()
+        .flat_map(|(base, variants)| {
+            variants
+                .into_iter()
+                .map(move |(scale, path)| (base.clone(), scale, path))
         })
-        .collect::<Vec<_>>();
+        .collect();
+    let dpi_raster_decoded: Vec<(String, u8, InputImage)> =
+        tokio::task::spawn_blocking(move || {
+            raster_dpi_flat
+                .into_par_iter()
+                .filter_map(|(base, scale, path)| {
+                    let image = image::open(&path).ok()?.into_rgba8();
+                    Some((base, scale, InputImage { name: String::new(), image }))
+                })
+                .collect()
+        })
+        .await
+        .expect("spawn_blocking panicked");
+
+    let mut dpi_groups = svg_dpi_groups;
+    for (base, scale, img) in dpi_raster_decoded {
+        dpi_groups.entry(base).or_default().push((scale, img));
+    }
+    for variants in dpi_groups.values_mut() {
+        variants.sort_by_key(|(s, _)| *s);
+    }
+
+    // Plain sources: decoded SVGs plus on-disk raster paths.
+    let plain_sources: Vec<PlainSource> = svg_plain
+        .into_iter()
+        .map(PlainSource::Decoded)
+        .chain(raster_plain.into_iter().map(|(path, _)| PlainSource::Path(path)))
+        .collect();
+
+    // Process plain images in parallel for CPU-bound operations (offloaded to
+    // blocking pool). Raster files are decoded right here, lazily.
+    let ctx_bleed = bleed;
+    // Owned copies so the `'static` blocking closure doesn't capture borrowed
+    // references into the async context.
+    let ctx_compress = compress_options.cloned();
+    let ctx_asset_type = asset_type.map(str::to_owned);
+    let base_path_owned = base_path.to_string();
+    let path_index_owned = path_index;
+
+    let pending_results: Vec<Result<Pending, ProcessingError>> =
+        tokio::task::spawn_blocking(move || {
+            let ctx = ProcessImageCtx {
+                path_index: &path_index_owned,
+                compress_options: ctx_compress.as_ref(),
+                bleed: ctx_bleed,
+                asset_type: ctx_asset_type.as_deref(),
+            };
+            plain_sources
+                .into_par_iter()
+                .map(|src| {
+                    let img = match src {
+                        PlainSource::Decoded(img) => img,
+                        PlainSource::Path(path) => {
+                            let image = image::open(&path)
+                                .map_err(|e| {
+                                    ProcessingError::new(anyhow::anyhow!(
+                                        "Failed to open image \"{}\": {}",
+                                        path.display(),
+                                        e
+                                    ))
+                                })?
+                                .into_rgba8();
+                            let name = stem_name(&relative_path(&path, &base_path_owned));
+                            InputImage { name, image }
+                        }
+                    };
+                    process_single_image_sync(img, &ctx)
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .expect("spawn_blocking panicked");
 
     // Collect results and count errors
+    let mut pending: Vec<Pending> = Vec::with_capacity(total);
     for result in pending_results {
         match result {
             Ok(p) => pending.push(p),
@@ -169,341 +257,83 @@ pub async fn process_individual(
     let mut upload_tasks: JoinSet<Result<(String, u64, String)>> = JoinSet::new();
     let mut dispatched = 0usize;
 
-    // Plain images
-    for p in &pending {
-        if dry_run {
-            dispatched += 1;
-            progress("Uploading", dispatched, total, p.name.as_str());
-            codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), 0));
-            continue;
-        }
+    // Unified dispatch: dry-run, Studio/Debug copies, cache hits and cloud
+    // uploads are handled identically to `raw` (see `dispatch::dispatch_asset`).
+    {
+        let mut dispatch_ctx = DispatchCtx {
+            input_name,
+            target,
+            dry_run,
+            creator,
+            client,
+            studio_sync,
+            debug_sync,
+            lockfile,
+            studio_expected_files,
+            upload_tasks: &mut upload_tasks,
+            semaphore: &semaphore,
+            total,
+            dispatched: &mut dispatched,
+            errors: &mut errors,
+        };
 
-        match target {
-            Target::Studio => {
-                dispatched += 1;
-                let rel = format!("{}.png", p.name);
-                let uri = if let Some(ss) = studio_sync {
-                    match ss.copy_asset(&rel, &p.bytes) {
-                        Ok(u) => {
-                            // Track expected file for Studio sync cleanup
-                            if let Some(ref mut set) = *studio_expected_files {
-                                set.insert(rel.clone());
-                            }
-                            u
-                        }
-                        Err(e) => {
-                            clear_progress_line();
-                            log!(warn, "Studio copy failed for \"{}\": {}", p.name, e);
-                            errors += 1;
-                            continue;
-                        }
-                    }
-                } else {
-                    String::new()
-                };
-                lockfile.set_uri(input_name, p.hash.clone(), uri.clone());
-                progress("Copying", dispatched, total, p.name.as_str());
-                codegen_entries.push(CodegenEntry::asset(
-                    p.name.clone(),
-                    codegen::AssetRef::Uri(uri),
-                ));
-            }
-            Target::Debug => {
-                dispatched += 1;
-                let rel = format!("{}.png", p.name);
-                if let Some(ds) = debug_sync
-                    && let Err(e) = ds.copy_asset(&rel, &p.bytes)
-                {
-                    clear_progress_line();
-                    log!(warn, "Debug copy failed for \"{}\": {}", p.name, e);
-                    errors += 1;
-                    continue;
-                }
-                let fallback = lockfile.get(input_name, &p.hash).unwrap_or(0);
-                progress("Copying", dispatched, total, p.name.as_str());
-                codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), fallback));
-            }
-            Target::Cloud => {
-                if let Some(cached_id) = lockfile.get(input_name, &p.hash) {
-                    clear_progress_line();
-                    log!(
-                        debug,
-                        "{}: unchanged, skipping (cached asset {})",
-                        p.name,
-                        cached_id
-                    );
-                    dispatched += 1;
-                    progress("Uploading", dispatched, total, p.name.as_str());
-                    codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), cached_id));
-                    continue;
-                }
-                let Some(c) = client else {
-                    codegen_entries.push(CodegenEntry::asset_id(p.name.clone(), 0));
-                    continue;
-                };
-                let c_arc = Arc::clone(c);
-                let file_name = p
-                    .path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned();
-                let name_clone = p.name.clone();
-                let hash_clone = p.hash.clone();
-                let display_name_clone = p.display_name.clone();
-                let description_clone = p.description.clone();
-                let bytes_clone = p.bytes.clone();
-                let kind_clone = p.kind;
-                let asset_type_clone = p.asset_type.clone();
-                let semaphore_clone = semaphore.clone();
-                let creator_own = creator.clone();
-                upload_tasks.spawn(async move {
-                    let _permit = semaphore_clone.acquire_owned().await;
-                    let id = c_arc
-                        .upload(UploadParams {
-                            file_name: file_name.clone(),
-                            display_name: display_name_clone.clone(),
-                            description: description_clone.clone(),
-                            data: bytes_clone.clone(),
-                            kind: kind_clone,
-                            asset_type_override: asset_type_clone
-                                .clone()
-                                .or_else(|| Some(kind_clone.api_type().to_string())),
-                            creator: creator_own,
-                        })
-                        .await
-                        .with_context(|| format!("Failed to upload \"{}\"", name_clone))?;
-                    Ok((name_clone, id, hash_clone))
-                });
-            }
+        for p in pending {
+            let name = p.name;
+            let rel = format!("{}.png", name);
+            dispatch_asset(
+                PendingAsset {
+                    name,
+                    path: p.path,
+                    bytes: Bytes::from(p.bytes),
+                    hash: p.hash,
+                    kind: p.kind,
+                    display_name: p.display_name,
+                    description: p.description,
+                    asset_type_override: p
+                        .asset_type
+                        .or_else(|| Some(p.kind.api_type().to_string())),
+                    studio_rel: rel.clone(),
+                    debug_rel: rel,
+                    studio_needs_upload: false,
+                },
+                &mut dispatch_ctx,
+                &mut codegen_entries,
+            );
         }
     }
 
-    // DPI group variants - pre-process in parallel using rayon, then upload in parallel
-    struct DpiVariantTask {
-        base_name: String,
-        scale: u8,
-        bytes: Vec<u8>,
-        hash: String,
-    }
-
-    // Collect all DPI variants for parallel pre-processing
-    let mut dpi_variants_to_process: Vec<(String, u8, crate::core::assets::img::pack::InputImage)> =
-        Vec::new();
-    for (base_name, variants) in &dpi_groups {
-        for (scale, img) in variants {
-            dpi_variants_to_process.push((base_name.clone(), *scale, img.clone()));
-        }
-    }
-
-    // Pre-process DPI variants in parallel (encode, bleed, compress, hash)
-    let dpi_variant_tasks: Vec<DpiVariantTask> = dpi_variants_to_process
-        .into_par_iter()
-        .filter_map(|(base_name, scale, img)| {
-            let mut rgba = img.image.clone();
-            if bleed {
-                alpha_bleed(&mut rgba);
-            }
-            let bytes = match encode_png(&rgba) {
-                Ok(b) => b,
-                Err(e) => {
-                    clear_progress_line();
-                    log!(warn, "Failed to encode {}@{}x: {}", base_name, scale, e);
-                    return None;
-                }
-            };
-            let bytes = maybe_compress_png(bytes, compress_options);
-            let hash = hash_image(&bytes);
-            Some(DpiVariantTask {
-                base_name,
-                scale,
-                bytes,
-                hash,
-            })
-        })
-        .collect();
-
-    // Group tasks by base_name for codegen output
-    let mut dpi_tasks_by_base: std::collections::HashMap<String, Vec<DpiVariantTask>> =
-        std::collections::HashMap::new();
-    for task in dpi_variant_tasks {
-        dpi_tasks_by_base
-            .entry(task.base_name.clone())
-            .or_default()
-            .push(task);
-    }
-
-    // Process DPI variants
-    let mut dpi_upload_tasks: JoinSet<Result<(String, u8, u64, String)>> = JoinSet::new();
-
-    for (base_name, tasks) in dpi_tasks_by_base {
-        if dry_run {
-            dispatched += 1;
-            progress("Uploading", dispatched, total, base_name.as_str());
-            let fake: Vec<(u8, u64)> = tasks.iter().map(|t| (t.scale, 0)).collect();
-            codegen_entries.push(CodegenEntry::dpi_group(base_name, fake));
-            continue;
-        }
-
-        for task in tasks {
-            match target {
-                Target::Cloud => {
-                    if let Some(cached) = lockfile.get(input_name, &task.hash) {
-                        dispatched += 1;
-                        progress("Uploading", dispatched, total, base_name.as_str());
-                        codegen_entries.push(CodegenEntry::dpi_group(
-                            base_name.clone(),
-                            vec![(task.scale, cached)],
-                        ));
-                        continue;
-                    }
-                    let Some(c) = client else {
-                        codegen_entries.push(CodegenEntry::dpi_group(
-                            base_name.clone(),
-                            vec![(task.scale, 0)],
-                        ));
-                        continue;
-                    };
-                    let file_name = format!(
-                        "{}@{}x.png",
-                        base_name.rsplit('/').next().unwrap_or(&base_name),
-                        task.scale
-                    );
-                    let c_arc = Arc::clone(c);
-                    let base_name_clone = base_name.clone();
-                    let hash_clone = task.hash.clone();
-                    let bytes_clone = task.bytes.clone();
-                    let scale = task.scale;
-                    let creator_clone = creator.clone();
-                    let asset_type_override = asset_type.map(|s| s.to_string());
-                    let semaphore_clone = semaphore.clone();
-                    dpi_upload_tasks.spawn(async move {
-                        let _permit = semaphore_clone.acquire_owned().await;
-                        let id = c_arc
-                            .upload(UploadParams {
-                                file_name,
-                                display_name: format!("{}@{}x", base_name_clone, scale),
-                                description: "Uploaded by Tungsten".to_string(),
-                                data: bytes_clone,
-                                kind: AssetKind::Image(ImageFormat::Png),
-                                asset_type_override,
-                                creator: creator_clone,
-                            })
-                            .await
-                            .with_context(|| {
-                                format!("Failed to upload \"{}\" @{}x", base_name_clone, scale)
-                            })?;
-                        Ok((base_name_clone, scale, id, hash_clone))
-                    });
-                }
-                Target::Studio => {
-                    let rel = format!("{}@{}x.png", base_name, task.scale);
-                    let uri = if let Some(ss) = studio_sync {
-                        match ss.copy_asset(&rel, &task.bytes) {
-                            Ok(u) => {
-                                if let Some(ref mut set) = *studio_expected_files {
-                                    set.insert(rel.clone());
-                                }
-                                u
-                            }
-                            Err(e) => {
-                                clear_progress_line();
-                                log!(warn, "Studio copy failed: {}", e);
-                                errors += 1;
-                                continue;
-                            }
-                        }
-                    } else {
-                        String::new()
-                    };
-                    lockfile.set_uri(input_name, task.hash.clone(), uri);
-                    dispatched += 1;
-                    progress("Copying", dispatched, total, &base_name);
-                    codegen_entries.push(CodegenEntry::dpi_group(
-                        base_name.clone(),
-                        vec![(
-                            task.scale,
-                            lockfile.get(input_name, &task.hash).unwrap_or(0),
-                        )],
-                    ));
-                }
-                Target::Debug => {
-                    let rel = format!("{}@{}x.png", base_name, task.scale);
-                    if let Some(ds) = debug_sync
-                        && let Err(e) = ds.copy_asset(&rel, &task.bytes)
-                    {
-                        clear_progress_line();
-                        log!(warn, "Debug copy failed: {}", e);
-                        errors += 1;
-                        continue;
-                    }
-                    dispatched += 1;
-                    progress("Copying", dispatched, total, &base_name);
-                    codegen_entries.push(CodegenEntry::dpi_group(
-                        base_name.clone(),
-                        vec![(
-                            task.scale,
-                            lockfile.get(input_name, &task.hash).unwrap_or(0),
-                        )],
-                    ));
-                }
-            }
-        }
-    }
-
-    // Collect Cloud DPI upload results
-    let mut dpi_results_by_base: std::collections::HashMap<String, Vec<(u8, u64)>> =
-        std::collections::HashMap::new();
-    while let Some(res) = dpi_upload_tasks.join_next().await {
-        match res {
-            Ok(Ok((base_name, scale, id, hash))) => {
-                lockfile.set(input_name, hash, id);
-                dpi_results_by_base
-                    .entry(base_name)
-                    .or_default()
-                    .push((scale, id));
-            }
-            Ok(Err(e)) => {
-                clear_progress_line();
-                log!(warn, "{}", e);
-                errors += 1;
-            }
-            Err(e) => {
-                clear_progress_line();
-                log!(warn, "DPI upload task panicked: {}", e);
-                errors += 1;
-            }
-        }
-    }
-
-    // Add DPI group codegen entries for Cloud uploads
-    for (base_name, mut variants) in dpi_results_by_base {
-        variants.sort_by_key(|(s, _)| *s);
-        codegen_entries.push(CodegenEntry::dpi_group(base_name, variants));
-    }
+    // DPI groups: encode/upload/copy + codegen via the shared processor.
+    // Produces exactly one `dpi_group` entry per base name.
+    errors += process_dpi_groups(
+        input_name,
+        dpi_groups,
+        bleed,
+        compress_options,
+        target,
+        dry_run,
+        creator,
+        asset_type,
+        client,
+        studio_sync,
+        debug_sync,
+        lockfile,
+        studio_expected_files,
+        max_concurrent_uploads,
+        &mut codegen_entries,
+    )
+    .await;
 
     // Cloud upload results
-    let mut completed = 0usize;
-    while let Some(res) = upload_tasks.join_next().await {
-        completed += 1;
-        match res {
-            Ok(Ok((name, id, hash))) => {
-                lockfile.set(input_name, hash, id);
-                progress("Uploading", dispatched + completed, total, &name);
-                codegen_entries.push(CodegenEntry::asset_id(name.to_string(), id));
-            }
-            Ok(Err(e)) => {
-                clear_progress_line();
-                log!(warn, "{}", e);
-                errors += 1;
-            }
-            Err(e) => {
-                clear_progress_line();
-                log!(warn, "Upload task panicked: {}", e);
-                errors += 1;
-            }
-        }
-    }
+    collect_upload_results(
+        &mut upload_tasks,
+        input_name,
+        lockfile,
+        &mut codegen_entries,
+        total,
+        dispatched,
+        &mut errors,
+    )
+    .await;
 
     write_codegen(
         codegen_entries,
@@ -515,27 +345,4 @@ pub async fn process_individual(
         &mut errors,
     );
     errors
-}
-
-/// Seeds web assets (pre-existing Roblox assets mapped in config) into codegen entries.
-/// This creates AssetRef::Id entries for assets that don't need uploading.
-fn seed_web_assets(
-    web_assets: &HashMap<RelativePathBuf, WebAsset>,
-    base_path: &str,
-    strip_extension: bool,
-    codegen_entries: &mut Vec<CodegenEntry>,
-) {
-    for (rel_path, web_asset) in web_assets {
-        let name = rel_path.to_string().replace('\\', "/");
-        let name = name
-            .strip_prefix(base_path.trim_end_matches('/'))
-            .unwrap_or(&name);
-        let name = name.trim_start_matches('/');
-        let key = if strip_extension {
-            name.trim_end_matches('.').to_string()
-        } else {
-            name.to_string()
-        };
-        codegen_entries.push(CodegenEntry::asset_id(key, web_asset.id));
-    }
 }

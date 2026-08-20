@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use bytes::Bytes;
 use rayon::prelude::*;
 use relative_path::RelativePathBuf;
 
@@ -20,7 +21,9 @@ use crate::utils::logger::{clear_progress_line, progress};
 use image::RgbaImage;
 
 use super::Target;
-use super::codegen_write::write_codegen;
+use super::codegen_write::{seed_web_assets, write_codegen};
+use super::dispatch::{copy_to_debug, copy_to_studio};
+use super::dpi;
 use super::encode::{encode_png, group_dpi_variants};
 
 #[allow(clippy::too_many_arguments)]
@@ -43,7 +46,7 @@ pub async fn process_packed(
     debug_sync: &Option<Arc<DebugSync>>,
     lockfile: &mut Lockfile,
     studio_expected_files: &mut Option<&mut HashSet<String>>,
-    _max_concurrent_uploads: usize,
+    max_concurrent_uploads: usize,
     web_assets: &HashMap<RelativePathBuf, WebAsset>,
     base_path: &str,
 ) -> u32 {
@@ -64,48 +67,28 @@ pub async fn process_packed(
     let mut codegen_entries: Vec<CodegenEntry> = Vec::new();
 
     // Seed web assets into codegen entries
-    for (rel_path, web_asset) in web_assets {
-        let name = rel_path.to_string().replace('\\', "/");
-        let name = name
-            .strip_prefix(base_path.trim_end_matches('/'))
-            .unwrap_or(&name);
-        let name = name.trim_start_matches('/');
-        let key = if strip_extension {
-            name.trim_end_matches('.').to_string()
-        } else {
-            name.to_string()
-        };
-        codegen_entries.push(CodegenEntry::asset(
-            key,
-            codegen::AssetRef::Id(web_asset.id),
-        ));
-    }
+    seed_web_assets(web_assets, base_path, strip_extension, &mut codegen_entries);
 
-    // DPI groups - skip packing and uploading, create codegen entries with placeholder IDs
-    // These go on a waitlist for manual upload later
-    if !dpi_groups.is_empty() {
-        for (base_name, variants) in dpi_groups {
-            // Extract unique scales and create placeholder variant data for codegen
-            let mut scales: std::collections::HashSet<u8> = std::collections::HashSet::new();
-            for &(scale, _) in variants.iter() {
-                scales.insert(scale);
-            }
-
-            // Convert to sorted vector for consistent codegen
-            let mut scale_vec: Vec<u8> = scales.into_iter().collect();
-            scale_vec.sort();
-
-            // Create placeholder variants with ID 0 (will be updated during manual upload)
-            let placeholder_variants: Vec<(u8, u64)> =
-                scale_vec.iter().map(|&scale| (scale, 0)).collect();
-
-            // Create DPI group codegen entry
-            codegen_entries.push(CodegenEntry::dpi_group(
-                base_name.to_string(),
-                placeholder_variants,
-            ));
-        }
-    }
+    // DPI groups - process as individual per-variant uploads/copies instead of
+    // waitlisting them. Each base emits exactly one `dpi_group` codegen entry.
+    errors += dpi::process_dpi_groups(
+        input_name,
+        dpi_groups,
+        bleed,
+        compress_options,
+        target,
+        dry_run,
+        creator,
+        asset_type,
+        client,
+        studio_sync,
+        debug_sync,
+        lockfile,
+        studio_expected_files,
+        max_concurrent_uploads,
+        &mut codegen_entries,
+    )
+    .await;
 
     // Plain images - continue with normal packing and processing
     if !plain_images.is_empty() {
@@ -132,35 +115,44 @@ pub async fn process_packed(
 
         let sheet_total = spritesheets.len();
 
-        // Pre-process all sheets: bleed, encode, compress in parallel
+        // Pre-process all sheets: bleed, encode, compress in parallel (offloaded to blocking pool)
         #[derive(Debug)]
         struct ProcessedSheet {
-            _image: RgbaImage,
             bytes: Vec<u8>,
             hash: String,
         }
 
+        let bleed_flag = bleed;
+        // Owned copies so the `'static` blocking closure doesn't capture
+        // borrowed references; the original `spritesheets` is still needed
+        // afterwards for codegen.
+        let compress_opts = compress_options.cloned();
+        let spritesheets_vec = spritesheets.clone();
+
         let processed_sheets: Vec<
             Result<ProcessedSheet, Box<dyn std::error::Error + Send + Sync>>,
-        > = spritesheets
-            .par_iter()
-            .map(
-                |sheet| -> Result<ProcessedSheet, Box<dyn std::error::Error + Send + Sync>> {
-                    let mut sheet_image: RgbaImage = sheet.image.clone();
-                    if bleed {
-                        alpha_bleed(&mut sheet_image);
-                    }
-                    let png_bytes: Vec<u8> = encode_png(&sheet_image)?;
-                    let png_bytes: Vec<u8> = maybe_compress_png(png_bytes, compress_options);
-                    let hash: String = hash_image(&png_bytes);
-                    Ok(ProcessedSheet {
-                        _image: sheet_image,
-                        bytes: png_bytes,
-                        hash,
-                    })
-                },
-            )
-            .collect();
+        > = tokio::task::spawn_blocking(move || {
+            spritesheets_vec
+                .par_iter()
+                .map(
+                    |sheet| -> Result<ProcessedSheet, Box<dyn std::error::Error + Send + Sync>> {
+                        let mut sheet_image: RgbaImage = sheet.image.clone();
+                        if bleed_flag {
+                            alpha_bleed(&mut sheet_image);
+                        }
+                        let png_bytes: Vec<u8> = encode_png(&sheet_image)?;
+                        let png_bytes: Vec<u8> = maybe_compress_png(png_bytes, compress_opts.as_ref());
+                        let hash: String = hash_image(&png_bytes);
+                        Ok(ProcessedSheet {
+                            bytes: png_bytes,
+                            hash,
+                        })
+                    },
+                )
+                .collect()
+        })
+        .await
+        .expect("spawn_blocking panicked");
 
         codegen_entries.reserve(spritesheets.len() * 2);
 
@@ -269,7 +261,7 @@ pub async fn upload_or_copy_sheet(
                     file_name: format!("{}.png", sheet_name),
                     display_name: sheet_name.to_string(),
                     description: sheet_description.to_string(),
-                    data: png_bytes.to_vec(),
+                    data: Bytes::copy_from_slice(png_bytes),
                     kind: AssetKind::Image(ImageFormat::Png),
                     asset_type_override: asset_type.map(|s| s.to_string()),
                     creator: creator.clone(),
@@ -281,32 +273,15 @@ pub async fn upload_or_copy_sheet(
         }
         Target::Studio => {
             let rel = format!("{}.png", sheet_name);
-            let uri = if let Some(ss) = studio_sync {
-                match ss.copy_asset(&rel, png_bytes) {
-                    Ok(u) => {
-                        // Track expected file for Studio sync cleanup
-                        if let Some(ref mut set) = *studio_expected_files {
-                            set.insert(rel.clone());
-                        }
-                        u
-                    }
-                    Err(e) => {
-                        return Err(e)
-                            .with_context(|| format!("Studio copy failed for \"{}\"", sheet_name));
-                    }
-                }
-            } else {
-                String::new()
-            };
+            let uri = copy_to_studio(studio_sync, studio_expected_files, &rel, png_bytes)
+                .with_context(|| format!("Studio copy failed for \"{}\"", sheet_name))?;
             lockfile.set_uri(input_name, hash.to_string(), uri.clone());
             Ok(codegen::AssetRef::Uri(uri))
         }
         Target::Debug => {
             let rel = format!("{}.png", sheet_name);
-            if let Some(ds) = debug_sync {
-                ds.copy_asset(&rel, png_bytes)
-                    .with_context(|| format!("Debug copy failed for \"{}\"", sheet_name))?;
-            }
+            copy_to_debug(debug_sync, &rel, png_bytes)
+                .with_context(|| format!("Debug copy failed for \"{}\"", sheet_name))?;
             Ok(codegen::AssetRef::Id(
                 lockfile.get(input_name, hash).unwrap_or(0),
             ))
