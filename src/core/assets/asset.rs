@@ -119,6 +119,15 @@ pub fn is_supported_ext(ext: &str) -> bool {
     kind_from_ext(ext).is_some()
 }
 
+/// Strip the file extension from a relative path and normalise separators to
+/// forward slashes. `"icons/arrow-up.png"` -> `"icons/arrow-up"`.
+pub fn stem_name(rel: &str) -> String {
+    Path::new(rel)
+        .with_extension("")
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
 /// Represents the format of a Roblox model file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RobloxModelFormat {

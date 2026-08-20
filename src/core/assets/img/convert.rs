@@ -8,19 +8,18 @@ use super::super::asset::ImageFormat;
 
 // SVG rasterization
 
-/// Rasterize an SVG file to a PNG byte buffer.
+/// Rasterize an SVG file into a straight-alpha RGBA image.
 ///
 /// `scale` controls output resolution: `1.0` renders at the SVG's natural size,
-/// `2.0` doubles it, etc. The result is always lossless PNG.
-pub fn svg_to_png(data: &[u8], scale: f32) -> Result<Vec<u8>> {
+/// `2.0` doubles it, etc.
+pub fn svg_to_rgba(data: &[u8], scale: f32) -> Result<RgbaImage> {
     let scale = scale.max(0.01);
 
     let opt = usvg::Options {
         style_sheet: Some("svg { color: white; }".to_string()),
         ..Default::default()
     };
-    // Inject a CSS stylesheet to ensure currentColor defaults to white instead of black
-    // This affects the root SVG element so that currentColor inherits white
+    // Inject a CSS stylesheet to ensure currentColor defaults to white instead of black.
     let tree = usvg::Tree::from_data(data, &opt).context("Failed to parse SVG")?;
 
     let size = tree.size();
@@ -36,9 +35,13 @@ pub fn svg_to_png(data: &[u8], scale: f32) -> Result<Vec<u8>> {
         &mut pixmap.as_mut(),
     );
 
-    pixmap
-        .encode_png()
-        .context("Failed to encode rasterized SVG as PNG")
+    // resvg renders into a premultiplied-alpha pixmap; convert to the
+    // straight (non-premultiplied) alpha the `image` crate expects.
+    // `take_demultiplied` consumes the pixmap and un-premultiplies in place,
+    // avoiding a second RGBA allocation and per-pixel loop. It also skips the
+    // PNG encode/decode roundtrip of every rasterized SVG.
+    let data = pixmap.take_demultiplied();
+    RgbaImage::from_raw(width, height, data).context("Failed to build RGBA image from pixmap")
 }
 
 // Image format conversion
@@ -129,31 +132,25 @@ where
 fn flatten_alpha(src: &RgbaImage) -> image::RgbImage {
     let (w, h) = src.dimensions();
     let mut out = image::RgbImage::new(w, h);
-    for (x, y, px) in src.enumerate_pixels() {
-        let a = px[3] as f32 / 255.0;
-        let r = (px[0] as f32 * a + 255.0 * (1.0 - a)) as u8;
-        let g = (px[1] as f32 * a + 255.0 * (1.0 - a)) as u8;
-        let b = (px[2] as f32 * a + 255.0 * (1.0 - a)) as u8;
-        out.put_pixel(x, y, image::Rgb([r, g, b]));
+    // Use integer alpha compositing to avoid per-pixel float division.
+    // Formula: out = (src * a + 255 * (255 - a)) / 255
+    let src_raw = src.as_raw();
+    let dst_raw = out.as_mut();
+    for (src_chunk, dst_chunk) in src_raw.chunks_exact(4).zip(dst_raw.chunks_exact_mut(3)) {
+        let a = src_chunk[3] as u16;
+        let inv_a = 255 - a;
+        // Integer division by 255 is ~20-30 cycles on x86; the exact bitwise
+        // approximation `(t + 1 + (t >> 8)) >> 8` is ~3 cycles and produces
+        // identical results for the u16 range used here (max 255*255 = 65025).
+        let blend = |c: u8| -> u8 {
+            let t = c as u16 * a + 255 * inv_a;
+            ((t + 1 + (t >> 8)) >> 8) as u8
+        };
+        dst_chunk[0] = blend(src_chunk[0]);
+        dst_chunk[1] = blend(src_chunk[1]);
+        dst_chunk[2] = blend(src_chunk[2]);
     }
     out
-}
-
-// Format string helpers
-
-#[allow(dead_code)]
-pub fn image_format_from_str(s: &str) -> Result<ImageFormat> {
-    use anyhow::bail;
-    match s.to_ascii_lowercase().as_str() {
-        "png" => Ok(ImageFormat::Png),
-        "jpg" | "jpeg" => Ok(ImageFormat::Jpg),
-        "bmp" => Ok(ImageFormat::Bmp),
-        "tga" => Ok(ImageFormat::Tga),
-        other => bail!(
-            "Unsupported image format \"{}\"\n  Hint: Supported formats: png, jpg, bmp, tga",
-            other
-        ),
-    }
 }
 
 // Tests
@@ -213,8 +210,25 @@ mod tests {
     }
 
     #[test]
-    fn test_svg_to_png_current_color_defaults_to_white() {
-        // Test SVG with currentColor - should now default to white
+    fn flatten_alpha_matches_exact_integer_division() {
+        // The bitwise `(t + 1 + (t >> 8)) >> 8` approximation must equal the
+        // exact `t / 255` for every (color, alpha) combination in range.
+        let mut img = RgbaImage::new(1, 1);
+        for c in 0..=255u8 {
+            for a in 0..=255u8 {
+                img.put_pixel(0, 0, image::Rgba([c, c, c, a]));
+                let flat = flatten_alpha(&img);
+                let exact = (c as u16 * a as u16 + 255u16 * (255 - a as u16)) / 255;
+                for ch in flat.as_raw().iter() {
+                    assert_eq!(*ch, exact as u8, "c={} a={}", c, a);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_svg_to_rgba_rasterizes_at_scale() {
+        // currentColor defaults to white via the injected stylesheet.
         let svg_data = r#"
             <svg width="10" height="10" xmlns="http://www.w3.org/2000/svg">
                 <circle cx="5" cy="5" r="4" fill="currentColor"/>
@@ -222,15 +236,11 @@ mod tests {
         "#
         .as_bytes();
 
-        let png_bytes = svg_to_png(svg_data, 1.0).expect("Failed to convert SVG");
-        let img = image::load_from_memory(&png_bytes).expect("Failed to load PNG");
+        let img = svg_to_rgba(svg_data, 2.0).expect("Failed to rasterize SVG");
+        assert_eq!(img.width(), 20);
+        assert_eq!(img.height(), 20);
 
-        // Verify we got a valid PNG
-        assert_eq!(img.width(), 10);
-        assert_eq!(img.height(), 10);
-
-        // The circle should be white (not black) - we can't easily check the exact color
-        // without loading the image data, but we can verify the conversion succeeded
-        // and produced a valid image of the expected size
+        // A rasterized opaque circle must have opaque pixels (straight alpha).
+        assert!(img.pixels().any(|p| p[3] == 255));
     }
 }

@@ -1,11 +1,11 @@
 //! Image compression via libcaesium.
 //!
-//! caesium operates on file paths, so in-memory buffers are written to a
-//! temporary file, compressed to a second temp file, then read back.
-//! Both temp files are cleaned up automatically on drop.
+//! Compression runs fully in memory (`caesium::compress_in_memory`) — no
+//! temporary files are written, avoiding the disk I/O bottleneck that
+//! path-based compression would impose per image.
 
 use crate::log;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use caesium::parameters::CSParameters;
 
 /// Quality settings per format. All fields are optional — `None` keeps the
@@ -25,75 +25,56 @@ impl Default for CompressOptions {
         Self {
             jpeg_quality: 80,
             png_quality: 80,
-            keep_metadata: true,
+            // Matches the config-level default in `config::CompressOptions::resolve`
+            // so there is a single source of truth for the defaults.
+            keep_metadata: false,
         }
     }
 }
 
 /// Compress `data` (already in a caesium-compatible format) and return the
-/// compressed bytes.
+/// compressed bytes, or `None` if the compressed result would not be smaller.
 ///
 /// `ext` must be one of: `png`, `jpg`/`jpeg`, `gif`, `tiff`/`tif`, `webp`.
 /// For unsupported formats call `convert::normalize_for_compression` first.
-pub fn compress_image(data: &[u8], ext: &str, options: &CompressOptions) -> Result<Vec<u8>> {
-    use std::io::Write;
-
-    // Write input to a named temp file with the correct extension so caesium
-    // can detect the format.
-    let mut input_tmp = tempfile::Builder::new()
-        .suffix(&format!(".{}", ext.to_ascii_lowercase()))
-        .tempfile()
-        .context("Failed to create input temp file for compression")?;
-
-    input_tmp
-        .write_all(data)
-        .context("Failed to write image data to temp file")?;
-
-    input_tmp
-        .flush()
-        .context("Failed to flush input temp file")?;
-
-    // Output temp file — same extension, caesium writes to it.
-    let output_tmp = tempfile::Builder::new()
-        .suffix(&format!(".{}", ext.to_ascii_lowercase()))
-        .tempfile()
-        .context("Failed to create output temp file for compression")?;
-
-    let input_path = input_tmp
-        .path()
-        .to_str()
-        .context("Input temp path is not valid UTF-8")?
-        .to_string();
-
-    let output_path = output_tmp
-        .path()
-        .to_str()
-        .context("Output temp path is not valid UTF-8")?
-        .to_string();
+///
+/// Returns `Err` only on I/O or compression failure; `Ok(None)` means
+/// compression succeeded but offered no space saving.
+pub fn compress_image(
+    data: &[u8],
+    ext: &str,
+    options: &CompressOptions,
+) -> Result<Option<Vec<u8>>> {
+    // `ext` is only used for format hints; the format itself is detected from
+    // the buffer contents by `compress_in_memory`, so no temp file (with its
+    // suffix) is needed.
+    let _ = ext;
 
     let params = build_params(options);
 
-    caesium::compress(input_path, output_path.clone(), &params)
+    // Fully in-memory pipeline: no temp files, no extra disk I/O per image.
+    let compressed = caesium::compress_in_memory(data.to_vec(), &params)
         .map_err(|e| anyhow::anyhow!("Compression failed: {:?}", e))?;
-
-    let compressed = std::fs::read(&output_path).context("Failed to read compressed output")?;
 
     // Only return the compressed result if it's actually smaller.
     // caesium can sometimes produce a larger file for already-optimized inputs.
     if compressed.len() < data.len() {
-        Ok(compressed)
+        Ok(Some(compressed))
     } else {
-        Ok(data.to_vec())
+        Ok(None)
     }
 }
 
 /// Optionally compress PNG bytes before upload.
+/// Returns the compressed bytes, or the original `bytes` if compression
+/// fails or produces a larger output.
 pub fn maybe_compress_png(bytes: Vec<u8>, compress_options: Option<&CompressOptions>) -> Vec<u8> {
     let Some(opts) = compress_options else {
         return bytes;
     };
     match compress_image(&bytes, "png", opts) {
-        Ok(compressed) => compressed,
+        Ok(Some(compressed)) => compressed,
+        Ok(None) => bytes,
         Err(e) => {
             log!(warn, "Compression failed, using original: {}", e);
             bytes
@@ -132,6 +113,7 @@ mod tests {
         let png = solid_png(64, 64);
         let opts = CompressOptions::default();
         let result = compress_image(&png, "png", &opts).unwrap();
+        let result = result.unwrap_or(png);
         assert!(!result.is_empty());
         let decoded = image::load_from_memory(&result).unwrap();
         assert_eq!(decoded.width(), 64);
@@ -142,7 +124,7 @@ mod tests {
     fn test_compress_never_returns_empty() {
         let png = solid_png(8, 8);
         let opts = CompressOptions::default();
-        let result = compress_image(&png, "png", &opts).unwrap();
+        let result = compress_image(&png, "png", &opts).unwrap().unwrap_or(png);
         assert!(!result.is_empty());
     }
 
@@ -151,7 +133,10 @@ mod tests {
         let png = solid_png(64, 64);
         let original_len = png.len();
         let opts = CompressOptions::default();
-        let result = compress_image(&png, "png", &opts).unwrap();
+        // compress_image returns None when compressed >= original
+        let result = compress_image(&png, "png", &opts)
+            .unwrap()
+            .unwrap_or_else(|| png.clone());
         assert!(
             result.len() <= original_len,
             "compressed ({}) should not exceed original ({})",

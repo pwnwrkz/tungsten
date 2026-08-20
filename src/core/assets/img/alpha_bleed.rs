@@ -9,11 +9,15 @@
 //! - `bit_vec::BitVec` for compact boolean storage
 //! - `VecDeque` for wave queues
 //! - 4-neighbor fast path, 8-neighbor fallback for correctness
+//! - thread-local buffer reuse: each Rayon worker processes many images, so
+//!   the BitVecs/queues are grown once per thread instead of re-allocated per
+//!   image.
 
 use bit_vec::BitVec;
 #[cfg(test)]
 use image::Rgba;
 use image::RgbaImage;
+use std::cell::RefCell;
 use std::collections::VecDeque;
 
 /// 4-neighbor offsets (cardinal directions) — checked first for speed.
@@ -31,26 +35,76 @@ const OFFSETS_8: [(i32, i32); 8] = [
     (1, -1),
 ];
 
+/// Reusable per-thread buffers for the wavefront algorithm.
+struct BleedBuffers {
+    can_be_sampled: Option<BitVec>,
+    visited: Option<BitVec>,
+    current_wave: VecDeque<u32>,
+    next_wave: VecDeque<u32>,
+    /// Pixels written in the current wave, marked samplable after the wave drains.
+    written_this_wave: Vec<u32>,
+}
+
+thread_local! {
+    static BUFFERS: RefCell<BleedBuffers> = const {
+        RefCell::new(BleedBuffers {
+            can_be_sampled: None,
+            visited: None,
+            current_wave: VecDeque::new(),
+            next_wave: VecDeque::new(),
+            written_this_wave: Vec::new(),
+        })
+    };
+}
+
 pub fn alpha_bleed(img: &mut RgbaImage) {
+    BUFFERS.with(|cell| {
+        let mut buffers = cell.borrow_mut();
+        run_alpha_bleed(img, &mut buffers);
+    });
+}
+
+fn run_alpha_bleed(img: &mut RgbaImage, b: &mut BleedBuffers) {
     let (width, height) = img.dimensions();
     if width == 0 || height == 0 {
         return;
     }
 
     let pixel_count = (width * height) as usize;
-    let max_queue_size = pixel_count.max(256);
+    // Wavefront queues are bounded by the perimeter, not the total area.
+    let wave_capacity = ((width + height) * 2).max(256) as usize;
 
-    // BitVec for compact boolean storage
-    let mut can_be_sampled = BitVec::from_elem(pixel_count, false);
-    let mut visited = BitVec::from_elem(pixel_count, false);
-
-    // Pre-allocated queues (double-buffered)
-    let mut current_wave = VecDeque::with_capacity(max_queue_size);
-    let mut next_wave = VecDeque::with_capacity(max_queue_size);
+    // (Re)use buffers: create once per thread, then grow to fit and reset.
+    let can_be_sampled = b
+        .can_be_sampled
+        .get_or_insert_with(|| BitVec::from_elem(pixel_count, false));
+    let visited = b
+        .visited
+        .get_or_insert_with(|| BitVec::from_elem(pixel_count, false));
+    if can_be_sampled.len() < pixel_count {
+        can_be_sampled.grow(pixel_count - can_be_sampled.len(), false);
+    }
+    can_be_sampled.fill(false);
+    if visited.len() < pixel_count {
+        visited.grow(pixel_count - visited.len(), false);
+    }
+    visited.fill(false);
+    b.current_wave.clear();
+    b.next_wave.clear();
+    b.written_this_wave.clear();
+    if b.current_wave.capacity() < wave_capacity {
+        b.current_wave.reserve(wave_capacity - b.current_wave.capacity());
+    }
+    if b.next_wave.capacity() < wave_capacity {
+        b.next_wave.reserve(wave_capacity - b.next_wave.capacity());
+    }
+    if b.written_this_wave.capacity() < wave_capacity {
+        b.written_this_wave.reserve(wave_capacity - b.written_this_wave.capacity());
+    }
 
     let pixels = img.as_raw();
 
-    // Init pass: mark opaque pixels, seed border-transparent pixels
+    // Init pass: mark opaque pixels
     for index in 0..pixel_count {
         let alpha = pixels[index * 4 + 3];
         if alpha != 0 {
@@ -93,7 +147,7 @@ pub fn alpha_bleed(img: &mut RgbaImage) {
             }
             if borders_opaque {
                 visited.set(index, true);
-                current_wave.push_back(index as u32);
+                b.current_wave.push_back(index as u32);
             }
         }
     }
@@ -101,8 +155,10 @@ pub fn alpha_bleed(img: &mut RgbaImage) {
     // Wave-front BFS with double-buffered queues
     let pixels = img.as_mut();
 
-    while !current_wave.is_empty() {
-        while let Some(flat_index) = current_wave.pop_front() {
+    while !b.current_wave.is_empty() {
+        b.written_this_wave.clear();
+
+        while let Some(flat_index) = b.current_wave.pop_front() {
             let index = flat_index as usize;
             let x = flat_index % width;
             let y = flat_index / width;
@@ -128,7 +184,7 @@ pub fn alpha_bleed(img: &mut RgbaImage) {
                     sample_count += 1;
                 } else if !visited.get(nidx).unwrap_or(false) {
                     visited.set(nidx, true);
-                    next_wave.push_back(nidx as u32);
+                    b.next_wave.push_back(nidx as u32);
                 }
             }
 
@@ -149,7 +205,7 @@ pub fn alpha_bleed(img: &mut RgbaImage) {
                         sample_count += 1;
                     } else if !visited.get(nidx).unwrap_or(false) {
                         visited.set(nidx, true);
-                        next_wave.push_back(nidx as u32);
+                        b.next_wave.push_back(nidx as u32);
                     }
                 }
             }
@@ -160,17 +216,21 @@ pub fn alpha_bleed(img: &mut RgbaImage) {
                 pixels[base] = (red_sum / sample_count) as u8;
                 pixels[base + 1] = (green_sum / sample_count) as u8;
                 pixels[base + 2] = (blue_sum / sample_count) as u8;
+                // Record this pixel so we can mark it as samplable after the
+                // wave is fully drained — the deque is empty at that point.
+                b.written_this_wave.push(flat_index);
             }
         }
 
-        // Mark current wave as samplable for next iteration
-        while let Some(flat_index) = current_wave.pop_front() {
+        // Mark the pixels written in this wave as samplable so the next wave
+        // can use their colours as bleed sources.
+        for &flat_index in &b.written_this_wave {
             can_be_sampled.set(flat_index as usize, true);
         }
 
         // Swap queues for next wave
-        std::mem::swap(&mut current_wave, &mut next_wave);
-        next_wave.clear();
+        std::mem::swap(&mut b.current_wave, &mut b.next_wave);
+        b.next_wave.clear();
     }
 }
 
@@ -262,5 +322,33 @@ mod tests {
         // Neighbors should be bled
         let p = img.get_pixel(255, 256);
         assert!(p[0] > 0 || p[1] > 0 || p[2] > 0);
+    }
+
+    #[test]
+    fn test_buffer_reuse_keeps_results_consistent() {
+        // Two calls in a row on the same thread exercise the thread-local
+        // buffer reuse path; results must match the fresh-path invariants.
+        let mut img1 = RgbaImage::new(3, 3);
+        img1.put_pixel(1, 1, Rgba([0, 128, 255, 255]));
+        alpha_bleed(&mut img1);
+
+        let mut img2 = RgbaImage::new(5, 5);
+        img2.put_pixel(2, 2, Rgba([255, 255, 255, 255]));
+        alpha_bleed(&mut img2);
+
+        // Second (larger) image still bleeds correctly.
+        assert_eq!(img2.get_pixel(2, 2), &Rgba([255, 255, 255, 255]));
+        assert_eq!(img2.get_pixel(1, 2)[3], 0);
+        assert!(img2.get_pixel(1, 2)[0] > 0 || img2.get_pixel(1, 2)[1] > 0);
+
+        // And a third, smaller image on the same thread (buffers shrink back).
+        let mut img3 = RgbaImage::new(3, 3);
+        img3.put_pixel(1, 1, Rgba([0, 128, 255, 255]));
+        alpha_bleed(&mut img3);
+        for &(x, y) in &[(0u32, 1u32), (2, 1), (1, 0), (1, 2)] {
+            let p = img3.get_pixel(x, y);
+            assert_eq!(p[3], 0, "alpha should remain 0 at ({x},{y})");
+            assert!(p[0] > 0 || p[1] > 0 || p[2] > 0);
+        }
     }
 }

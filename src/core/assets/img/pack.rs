@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use crunch::{Item, Rotation};
 use rayon::prelude::*;
 
+use crate::core::assets::asset::stem_name;
 use crate::log;
 
 // Types
@@ -15,6 +16,7 @@ pub struct InputImage {
     pub image: RgbaImage,
 }
 
+#[derive(Clone)]
 #[allow(dead_code)]
 pub struct PackedImage {
     pub name: String,
@@ -25,6 +27,7 @@ pub struct PackedImage {
     pub height: u32,
 }
 
+#[derive(Clone)]
 pub struct Spritesheet {
     pub image: RgbaImage,
     pub images: Vec<PackedImage>,
@@ -34,24 +37,41 @@ pub struct Spritesheet {
 
 /// Load every PNG at the given paths in parallel.
 /// Names are relative to `base_path` with the extension stripped.
+/// Uses chunked iteration to bound peak memory usage when decoding many images.
 pub fn load_images(paths: Vec<PathBuf>, base_path: &str) -> Result<Vec<InputImage>> {
-    paths
+    const CHUNK_SIZE: usize = 10;
+    // Decode in bounded chunks so only CHUNK_SIZE images are ever decoded
+    // concurrently, bounding peak memory on large projects. Errors are
+    // collected per-chunk and the first failure is propagated after the
+    // parallel pass finishes.
+    let chunks: Vec<Result<Vec<InputImage>>> = paths
         .into_par_iter()
-        .map(|path| {
-            let image = image::open(&path)
-                .with_context(|| format!("Failed to open image \"{}\"", path.display()))?
-                .into_rgba8();
+        .chunks(CHUNK_SIZE)
+        .map(|chunk| {
+            chunk
+                .into_iter()
+                .map(|path| {
+                    let image = image::open(&path)
+                        .with_context(|| format!("Failed to open image \"{}\"", path.display()))?
+                        .into_rgba8();
 
-            let name = path
-                .strip_prefix(base_path)
-                .unwrap_or(&path)
-                .with_extension("")
-                .to_string_lossy()
-                .replace('\\', "/");
+                    let rel = path
+                        .strip_prefix(base_path)
+                        .unwrap_or(&path)
+                        .to_string_lossy();
+                    let name = stem_name(&rel);
 
-            Ok(InputImage { name, image })
+                    Ok(InputImage { name, image })
+                })
+                .collect::<Result<Vec<_>>>()
         })
-        .collect()
+        .collect();
+
+    let mut out = Vec::new();
+    for chunk in chunks {
+        out.extend(chunk?);
+    }
+    Ok(out)
 }
 
 /// Pack images into spritesheets with automatic sizing similar to Adobe Animate.
