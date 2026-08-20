@@ -2,9 +2,9 @@
 -- It is not intended for manual editing.
 
 local models = {
-	Bubble = "rbxassetid://117254011014738",
-	Health = "rbxassetid://117193849492366",
-	Meshes = "rbxassetid://107992922401734",
+	Bubble = "rbxassetid://122536736677320",
+	Health = "rbxassetid://90462244729712",
+	Meshes = "rbxassetid://118609246844743",
 }
 
 return models

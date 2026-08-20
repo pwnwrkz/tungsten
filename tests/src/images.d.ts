@@ -2,17 +2,13 @@
 // It is not intended for manual editing.
 
 declare const images: {
-	check: {
-		Image: string
-		ImageRectOffset: Vector2
-		ImageRectSize: Vector2
+	placeholder: {
+		check: string
+		x: string
 	}
-	"chevron-down": (dpiScale: number) => string
-	search: (dpiScale: number) => string
-	x: {
-		Image: string
-		ImageRectOffset: Vector2
-		ImageRectSize: Vector2
+	searchbar: {
+		"chevron-down": (dpiScale: number) => string
+		search: (dpiScale: number) => string
 	}
 }
 
