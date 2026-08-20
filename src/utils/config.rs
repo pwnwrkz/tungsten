@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use relative_path::RelativePathBuf;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use toml;
 
 use crate::core::assets::asset::WebAsset;
@@ -11,7 +11,17 @@ use crate::log;
 
 const MIN_SVG_SCALE: f32 = 0.01;
 
-#[derive(Deserialize)]
+/// Memoization cache for `.tmeta` `svg_scale` lookups, keyed by the candidate
+/// `.tmeta` path. Shared across parallel SVG rasterization so a directory's
+/// `.tmeta` file is read and parsed once per sync instead of once per SVG.
+pub type SvgScaleCache = std::sync::Mutex<HashMap<PathBuf, Option<f32>>>;
+
+/// Create an empty `SvgScaleCache`.
+pub fn new_svg_scale_cache() -> SvgScaleCache {
+    SvgScaleCache::new(HashMap::new())
+}
+
+#[derive(Deserialize, Clone)]
 pub struct Config {
     pub creator: CreatorConfig,
     pub codegen: Option<CodegenConfig>,
@@ -33,7 +43,7 @@ fn default_creator_type() -> String {
     "user".to_string()
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct CreatorConfig {
     #[serde(rename = "type", default = "default_creator_type")]
     /// Creator type to use: `"user"` or `"group"`. Defaults to `"user"`.
@@ -42,7 +52,7 @@ pub struct CreatorConfig {
     pub id: u64,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct CodegenConfig {
     /// Codegen style: `"flat"` or `"nested"`. Defaults to `"flat"`.
     pub style: Option<String>,
@@ -56,9 +66,18 @@ pub struct CodegenConfig {
 
 impl CodegenConfig {
     /// Returns the configured codegen style, defaulting to `"flat"` when omitted.
-    #[allow(dead_code)]
     pub fn resolved_style(&self) -> &str {
         self.style.as_deref().unwrap_or("flat")
+    }
+
+    /// Whether to strip file extensions from asset names (defaults to `false`).
+    pub fn resolved_strip_extension(&self) -> bool {
+        self.strip_extension.unwrap_or(false)
+    }
+
+    /// Whether to generate a `.d.ts` file alongside the Luau output (defaults to `false`).
+    pub fn resolved_ts_declaration(&self) -> bool {
+        self.ts_declaration.unwrap_or(false)
     }
 }
 
@@ -104,7 +123,7 @@ impl CompressOptions {
 }
 
 /// Studio-specific configuration.
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Clone)]
 pub struct StudioConfig {
     /// Base path to Roblox installation (where Versions folder lives).
     /// If set, overrides auto-detection.
@@ -136,7 +155,7 @@ pub struct StudioConfig {
 /// [inputs.icons.web]
 /// "special-icon.png" = { id = 123456789 }
 /// ```
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct InputConfig {
     /// Glob pattern for source files.
     pub path: String,
@@ -165,6 +184,7 @@ pub struct InputConfig {
 
 impl InputConfig {
     /// Resolved SVG rasterization scale (defaults to 1.0).
+    #[cfg(test)]
     pub fn resolved_svg_scale(&self) -> f32 {
         self.svg_scale.unwrap_or(1.0).max(MIN_SVG_SCALE)
     }
@@ -172,30 +192,57 @@ impl InputConfig {
     /// Returns the effective SVG scale for a given file, checking
     /// `.tmeta` files in the file's directory and parent directories up to
     /// the input directory, falling back to the configured value.
+    #[cfg(test)]
     pub fn effective_svg_scale(&self, file_path: &Path, base_path: &str) -> f32 {
+        Self::effective_svg_scale_for_path(
+            file_path,
+            base_path,
+            self.svg_scale,
+            &new_svg_scale_cache(),
+        )
+    }
+
+    /// Static helper to compute effective SVG scale without an `InputConfig` instance.
+    /// Used from parallel processing in `spawn_blocking` where we can't capture `&self`.
+    /// `cache` memoizes `.tmeta` reads shared across all files being processed.
+    pub fn effective_svg_scale_for_path(
+        file_path: &Path,
+        base_path: &str,
+        configured_scale: Option<f32>,
+        cache: &SvgScaleCache,
+    ) -> f32 {
         let base = Path::new(base_path);
-        // Walk from the file's directory up to and including the base directory.
         for anc in file_path.ancestors() {
-            // Stop if we have gone above the base directory.
             if !anc.starts_with(base) {
                 break;
             }
-            if let Some(scale) = Self::svg_scale_from_tmeta(anc) {
+            if let Some(scale) = Self::svg_scale_from_tmeta(anc, cache) {
                 return scale.max(MIN_SVG_SCALE);
             }
-            // Stop after checking the base directory itself.
             if anc == base {
                 break;
             }
         }
-        // Fallback to the config‑provided scale (or default 1.0).
-        self.resolved_svg_scale()
+        configured_scale.unwrap_or(1.0).max(MIN_SVG_SCALE)
     }
 
     /// Attempts to read an `svg_scale` field from a `.tmeta` file associated
     /// with `item` (which may be a file or directory). Returns `None` if the
     /// file does not exist, cannot be parsed, or does not contain the field.
-    fn svg_scale_from_tmeta(item: &Path) -> Option<f32> {
+    /// Candidate paths are memoized in `cache` so repeated lookups across many
+    /// files in the same directories don't re-read the same `.tmeta` from disk.
+    fn svg_scale_from_tmeta(item: &Path, cache: &SvgScaleCache) -> Option<f32> {
+        /// Read `path` once, caching the result (including misses).
+        fn read_cached(path: &Path, cache: &SvgScaleCache) -> Option<f32> {
+            let mut guard = cache.lock().unwrap();
+            if let Some(&v) = guard.get(path) {
+                return v;
+            }
+            let v = InputConfig::try_read_tmeta(path);
+            guard.insert(path.to_path_buf(), v);
+            v
+        }
+
         // Determine candidate .tmeta paths following the same precedence as
         // `AssetMeta::load_for`.
         if item.is_file() {
@@ -203,14 +250,14 @@ impl InputConfig {
             if let Some(ext) = item.extension() {
                 let mut path = item.to_path_buf();
                 path.set_extension(format!("{}.tmeta", ext.to_string_lossy()));
-                if let Some(scale) = Self::try_read_tmeta(&path) {
+                if let Some(scale) = read_cached(&path, cache) {
                     return Some(scale);
                 }
             }
             // Fall back to <file>.tmeta.
             let mut path = item.to_path_buf();
             path.set_extension("tmeta");
-            if let Some(scale) = Self::try_read_tmeta(&path) {
+            if let Some(scale) = read_cached(&path, cache) {
                 return Some(scale);
             }
         } else {
@@ -225,7 +272,7 @@ impl InputConfig {
             };
             parent.push(dir_name);
             parent.set_extension("tmeta");
-            if let Some(scale) = Self::try_read_tmeta(&parent) {
+            if let Some(scale) = read_cached(&parent, cache) {
                 return Some(scale);
             }
         }

@@ -4,8 +4,9 @@ mod core;
 mod utils;
 
 use clap::{Parser, Subcommand};
+use commands::sync::Target;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use utils::config;
 
 #[derive(Parser)]
@@ -28,7 +29,8 @@ enum Commands {
     /// Pack and upload assets to Roblox
     Sync {
         /// Upload target: `cloud`, `studio`, or `debug`
-        target: Option<String>,
+        #[arg(value_enum)]
+        target: Option<Target>,
 
         /// Roblox Open Cloud API key (required for cloud target)
         #[arg(long)]
@@ -41,7 +43,8 @@ enum Commands {
     /// Watch asset folders and re-sync automatically on changes
     Watch {
         /// Upload target: `cloud`, `studio`, or `debug`
-        target: String,
+        #[arg(value_enum)]
+        target: Target,
 
         /// Roblox Open Cloud API key (required for cloud target)
         #[arg(long)]
@@ -63,17 +66,20 @@ async fn main() {
 
     utils::logger::set_verbose(cli.verbose);
 
-    // Shared flag so watch::run can signal whether a sync is in progress.
-    // Only meaningful for the Watch command; ignored by all others.
-    let is_syncing = Arc::new(AtomicBool::new(false));
+    // Shared flag so watch can signal whether a sync is in progress. Only the
+    // Watch command allocates it — every other command passes `None`.
     let is_watch = matches!(cli.command, Commands::Watch { .. });
+    let is_syncing = is_watch.then(|| Arc::new(AtomicBool::new(false)));
 
     let result = tokio::select! {
-        res = run(cli, Arc::clone(&is_syncing)) => res,
+        res = run(cli, is_syncing.clone()) => res,
         _ = tokio::signal::ctrl_c() => {
             println!();
             if is_watch {
-                if is_syncing.load(Ordering::Relaxed) {
+                if is_syncing
+                    .as_ref()
+                    .is_some_and(|f| f.load(std::sync::atomic::Ordering::Relaxed))
+                {
                     log!(error, "Watching was cancelled while a sync was in progress. Some assets may not have been processed");
                     log!(warn, "Re-run sync to resume, completed uploads are cached in tungsten.lock.toml");
                 } else {
@@ -93,7 +99,7 @@ async fn main() {
     }
 }
 
-async fn run(cli: Cli, is_syncing: Arc<AtomicBool>) -> anyhow::Result<()> {
+async fn run(cli: Cli, is_syncing: Option<Arc<AtomicBool>>) -> anyhow::Result<()> {
     match cli.command {
         Commands::Sync {
             target,
@@ -102,20 +108,21 @@ async fn run(cli: Cli, is_syncing: Arc<AtomicBool>) -> anyhow::Result<()> {
         } => {
             let config = config::load("tungsten.toml")?;
             let target = match target {
-                Some(t) => commands::sync::Target::parse(&t)?,
+                Some(t) => t,
                 None => {
                     if dry_run {
-                        commands::sync::Target::parse("debug")?
+                        Target::Debug
                     } else {
                         anyhow::bail!("Target is required when not in dry run mode.")
                     }
                 }
             };
-            commands::sync::run(config, api_key, target, dry_run).await
+            commands::sync::run(&config, api_key.as_deref(), target, dry_run).await
         }
         Commands::Watch { target, api_key } => {
             let config = config::load("tungsten.toml")?;
-            let target = commands::sync::Target::parse(&target)?;
+            let is_syncing =
+                is_syncing.expect("is_syncing must be provided for the Watch command");
             commands::watch::run(config, api_key, target, is_syncing).await
         }
         Commands::Init => commands::init::run(),

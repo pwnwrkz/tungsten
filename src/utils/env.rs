@@ -6,11 +6,11 @@ const ENV_FILE: &str = ".env";
 const ENV_KEY: &str = "TUNGSTEN_API_KEY";
 const GLOBAL_VAR: &str = "TUNGSTEN_GLOBAL_APIKEY";
 
-pub fn resolve_api_key(flag: Option<String>) -> Option<String> {
+pub fn resolve_api_key(flag: Option<&str>) -> Option<String> {
     // Explicit flag
-    if flag.is_some() {
+    if let Some(f) = flag {
         log!(debug, "API key resolved from CLI flag");
-        return flag;
+        return Some(f.to_string());
     }
 
     // Local ENV file
@@ -50,9 +50,13 @@ pub fn resolve_api_key(flag: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::fs;
 
+    /// Mutates a process-global env var — must not run concurrently with the
+    /// other env test (or `lockfile::tests::test_global_env_var`).
     #[test]
+    #[serial]
     fn test_global_env_var() {
         // Backup existing .env if present so CI repo files don't interfere with this test
         let mut backed_up = false;
@@ -72,7 +76,10 @@ mod tests {
         }
     }
 
+    /// Swaps `.env` files in the working directory — must not run concurrently
+    /// with other tests touching the process environment.
     #[test]
+    #[serial]
     fn test_env_file_parsing() {
         // Create a temporary .env file
         let test_content = "TUNGSTEN_API_KEY=test_key_from_env\nOTHER_VAR=value";

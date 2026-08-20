@@ -3,12 +3,6 @@ use crate::utils::interactive::{self, DiscoveredFolder, FolderSelection};
 use anyhow::Result;
 use std::path::Path;
 
-#[allow(dead_code)]
-const ASSET_EXTENSIONS: &[&str] = &[
-    "png", "jpg", "jpeg", "bmp", "tga", "svg", "mp3", "ogg", "flac", "wav", "fbx", "gltf", "glb",
-    "rbxm", "rbxmx",
-];
-
 const KNOWN_ASSET_DIRS: &[&str] = &[
     "assets",
     "asset",
@@ -287,6 +281,11 @@ fn is_type_specific_dir(name: &str) -> bool {
     )
 }
 
+/// Case-insensitive extension match without allocating a lowercase String.
+fn ext_matches(ext: &str, candidates: &[&str]) -> bool {
+    candidates.iter().any(|c| ext.eq_ignore_ascii_case(c))
+}
+
 fn count_assets_in_dir(dir: &Path) -> interactive::AssetCounts {
     let mut counts = interactive::AssetCounts::default();
 
@@ -296,28 +295,23 @@ fn count_assets_in_dir(dir: &Path) -> interactive::AssetCounts {
             if path.is_dir() {
                 continue;
             }
-            let ext = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
-                .to_ascii_lowercase();
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
-            match ext.as_str() {
-                "png" | "jpg" | "jpeg" | "bmp" | "tga" | "svg" => counts.images += 1,
-                "mp3" | "ogg" | "flac" | "wav" => counts.audio += 1,
-                "fbx" | "gltf" | "glb" | "rbxm" | "rbxmx" => {
-                    // Check if rbxm/rbxmx is animation
-                    if ext == "rbxm" || ext == "rbxmx" {
-                        if let Ok(true) = crate::core::assets::asset::is_animation_file(&path) {
-                            counts.animations += 1;
-                        } else {
-                            counts.models += 1;
-                        }
-                    } else {
-                        counts.models += 1;
-                    }
+            if ext_matches(ext, &["png", "jpg", "jpeg", "bmp", "tga", "svg"]) {
+                counts.images += 1;
+            } else if ext_matches(ext, &["mp3", "ogg", "flac", "wav"]) {
+                counts.audio += 1;
+            } else if ext_matches(ext, &["fbx", "gltf", "glb"]) {
+                counts.models += 1;
+            } else if ext.eq_ignore_ascii_case("rbxm") || ext.eq_ignore_ascii_case("rbxmx") {
+                // Check if rbxm/rbxmx is animation
+                if let Ok(true) = crate::core::assets::asset::is_animation_file(&path) {
+                    counts.animations += 1;
+                } else {
+                    counts.models += 1;
                 }
-                _ => counts.other += 1,
+            } else {
+                counts.other += 1;
             }
         }
     }
@@ -358,8 +352,7 @@ fn is_noise_dir(name: &str) -> bool {
             | "vendor"
             | "deps"
             | "packages"
-            | "Packages"
-            | "DevPackages"
+            | "devpackages"
     )
 }
 
@@ -373,17 +366,21 @@ fn build_interactive_config(
     strip_extension: bool,
     ts_declaration: bool,
 ) -> String {
+    use std::fmt::Write;
+
     let mut out = String::new();
 
-    out.push_str("[creator]\n");
-    out.push_str(&format!("type = \"{}\"\n", creator_type));
-    out.push_str(&format!("id = {}\n", creator_id));
+    // `writeln!` formats directly into the buffer instead of allocating an
+    // intermediate String per field.
+    writeln!(out, "[creator]").unwrap();
+    writeln!(out, "type = \"{}\"", creator_type).unwrap();
+    writeln!(out, "id = {}", creator_id).unwrap();
     out.push('\n');
 
-    out.push_str("[codegen]\n");
-    out.push_str(&format!("style = \"{}\"\n", codegen_style));
-    out.push_str(&format!("strip_extension = {}\n", strip_extension));
-    out.push_str(&format!("ts_declaration = {}\n", ts_declaration));
+    writeln!(out, "[codegen]").unwrap();
+    writeln!(out, "style = \"{}\"", codegen_style).unwrap();
+    writeln!(out, "strip_extension = {}", strip_extension).unwrap();
+    writeln!(out, "ts_declaration = {}", ts_declaration).unwrap();
     out.push('\n');
 
     if folders.is_empty() {
@@ -410,12 +407,12 @@ fn build_interactive_config(
             .trim_matches('_')
             .to_string();
 
-        out.push_str(&format!("[inputs.{}]\n", name));
-        out.push_str(&format!("path = \"{}/**/*\"\n", folder.path));
-        out.push_str(&format!("output_path = \"src/{}.luau\"\n", name));
+        writeln!(out, "[inputs.{}]", name).unwrap();
+        writeln!(out, "path = \"{}/**/*\"", folder.path).unwrap();
+        writeln!(out, "output_path = \"src/{}.luau\"", name).unwrap();
 
         if folder.asset_type != "auto" {
-            out.push_str(&format!("type = \"{}\"\n", folder.asset_type));
+            writeln!(out, "type = \"{}\"", folder.asset_type).unwrap();
         }
 
         out.push('\n');
