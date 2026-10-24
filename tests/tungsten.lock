@@ -1,0 +1,68 @@
+version = 3
+
+[inputs.images.old_circle_sprite]
+kind = "image/png"
+source_hash = "400f1a75c365b015aa3731fb05d319684e782de155b5e4d764659f39d2e24cb8"
+hash = "3f482f933a63304fb6ebd501801831854844e45145bc3820c3d0e2f89b82a36f"
+id = 132402313711626
+studio_uri = "rbxasset://.tungsten_tests/old_circle_sprite.png"
+packable = false
+
+[inputs.images."placeholder/check"]
+kind = "image/png"
+source_hash = "3751b37796055d12e3b955b9afb117878d82ba26d35629afd460d7b070885c17"
+hash = "95349ff212d16ac220595679ac197ab43c24a28e387c92c9b7362c94774af561"
+id = 71709149542561
+studio_uri = "rbxasset://.tungsten_tests/placeholder/check.png"
+packable = false
+
+[inputs.images."placeholder/x"]
+kind = "image/png"
+source_hash = "b43d1695c21206632309dcd392a982904c50149fc13b09edc0f66307f25022da"
+hash = "877d5b98d1c8d8e6fdbd2a4fe677477ab91ae522b6be6a6e57818430375fff38"
+id = 101039062545115
+studio_uri = "rbxasset://.tungsten_tests/placeholder/x.png"
+packable = false
+
+[inputs.images."searchbar/chevron-down"]
+kind = "image/png"
+source_hash = "0a5ff8f13c5861be96eca045603615b025d055e6344905022f055296bbba81c2"
+packable = true
+
+[inputs.images."searchbar/chevron-down".dpi]
+1 = { hash = "2010f2fd0a33c18c52dd3970e0a3d669f7cb450edccaf7991aba4d839f1c5926", id = 109802702889078 }
+2 = { hash = "2ffbe74c214028724ed18fc260dbc5f534e3e47f1212add6e7c22b92d5117906", id = 106680019986857 }
+
+[inputs.images."searchbar/search"]
+kind = "image/png"
+source_hash = "b8c712713dd8dad25403d51e58c038e32ad21ba8540af595a7f43f62a1ec7b90"
+packable = true
+
+[inputs.images."searchbar/search".dpi]
+1 = { hash = "54aec8ff93fdc8468ae632e228a7165001ad9594cfadf2835f92e266471f2c4f", id = 103956615942292 }
+2 = { hash = "6b65f2b9aa689a15c881db2f283fc8698e009b8f32701006394e3c380051a197", id = 138220547428676 }
+3 = { hash = "a1ccbab241bf5e7039cde195156686847a555592dbdfefd0d7dee5592bf9316d", id = 95982845344718 }
+
+[inputs.models.Bubble]
+kind = "model/x-rbxm"
+source_hash = "1b57c514c1da56d679bfa0822887fe439f58f4125035fb4cfb0c986356e32f03"
+hash = "1b57c514c1da56d679bfa0822887fe439f58f4125035fb4cfb0c986356e32f03"
+id = 102541041460776
+studio_uri = "rbxassetid://102541041460776"
+packable = false
+
+[inputs.models.Health]
+kind = "model/x-rbxm"
+source_hash = "e2d7a718f12ee95d3338c57ddde170ae4f502c341252be96ea8807a4d284d57d"
+hash = "e2d7a718f12ee95d3338c57ddde170ae4f502c341252be96ea8807a4d284d57d"
+id = 79621025133793
+studio_uri = "rbxassetid://79621025133793"
+packable = false
+
+[inputs.models.Meshes]
+kind = "model/x-rbxm"
+source_hash = "6b686f1412079433fa7689620e4d109871e43bd9ae6ed849dad11b158f99dacf"
+hash = "6b686f1412079433fa7689620e4d109871e43bd9ae6ed849dad11b158f99dacf"
+id = 111803887798138
+studio_uri = "rbxassetid://111803887798138"
+packable = false

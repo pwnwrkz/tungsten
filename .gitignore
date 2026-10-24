@@ -21,7 +21,10 @@ target/
 
 # Tungsten specific ignores
 /tungsten.toml
+/tungsten.lock
 /tungsten.lock.toml
+/tungsten.lock.v2.bak
+/tungsten.lock.toml.v2.bak
 
 # Tungsten API key
 tungsten_api_key.env
@@ -72,4 +75,6 @@ copilot-instructions.md
 .warp/*
 .amazonq/rules/*
 .junie/*
+.opencode/*
 opencode.json
+opencode.jsonc
