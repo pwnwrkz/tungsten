@@ -1,56 +1,66 @@
 [package]
-name         = "tungsten-cli"
-description  = "Another command line tool to manage Roblox assets similar to Tarmac and Asphalt."
-version      = "3.1.1"
-edition      = "2024"
+name = "tungsten-cli"
+version = "4.0.0-rc.1"
+edition = "2024"
+description = "Another command line tool to manage Roblox assets similar to Tarmac and Asphalt."
+readme = "README.md"
+homepage = "https://pwnwrkz.github.io/tungsten-docs"
+repository = "https://github.com/pwnwrkz/tungsten/"
 license-file = "LICENSE"
-readme       = "README.md"
-homepage     = "https://pwnwrkz.github.io/tungsten-docs"
-repository   = "https://github.com/pwnwrkz/tungsten/"
-keywords     = ["roblox", "assets", "sync", "upload"]
+keywords = ["assets", "roblox", "sync", "upload"]
 
 exclude = [".github/**", "assets", "assets/**", "examples", "examples/**"]
 include = ["src/", "src/**"]
-
-[dependencies]
-anyhow        = "1.0.104"
-bit-vec       = "0.10"
-bytes         = "1"
-clap          = { version = "4.6.6", features = ["derive"] }
-colored       = "3.1"
-crunch        = "0.5"
-glob          = "0.3.4"
-hex           = "0.4.3"
-image         = { version = "0.25", features = ["jpeg", "bmp", "tga"] }
-crossterm     = "0.29.0"
-inquire       = { version = "0.9", features = ["crossterm"] }
-libcaesium    = "0.20"
-notify        = "8.2"
-rayon         = "1.12.0"
-rbx_binary    = "3.0"
-rbx_xml       = "3.0"
-relative-path = { version = "2.0.1", features = ["serde"] }
-reqwest       = { version = "0.13.4", features = ["json", "multipart"] }
-resvg         = "0.48.1"
-rbx_install   = "1.0.0"
-serde         = { version = "1.0.229", features = ["derive"] }
-serde_json    = "1.0.151"
-sha2          = "0.11"
-tempfile      = "3.27"
-tiny-skia     = "0.12"
-tokio         = { version = "1.53.1", features = ["full"] }
-toml          = "1.1.4"
-usvg          = "0.48.1"
-
-[dev-dependencies]
-http          = "1"
-serial_test   = "3"
 
 [[bin]]
 name = "tungsten"
 path = "src/main.rs"
 
+[dependencies]
+anyhow = "1.0.104"
+bit-vec = "0.10.1"
+bytes = "1.12.1"
+clap = { version = "4.6.7", features = ["derive"] }
+colored = "3.1.1"
+crossterm = "0.29.0"
+crunch = "0.5.3"
+ebur128 = "0.1.10"
+glob = "0.3.4"
+hex = "0.4.3"
+image = { version = "0.25.10", features = ["bmp", "jpeg", "tga"] }
+inquire = { version = "0.9.4", features = ["crossterm"] }
+libcaesium = "0.21.2"
+notify = "8.2.0"
+rayon = "1.12.0"
+rbx_binary = "3.0.1"
+rbx_install = "1.0.0"
+rbx_xml = "3.0.1"
+relative-path = { version = "2.0.2", features = ["serde"] }
+reqwest = { version = "0.13.5", features = ["json", "multipart"] }
+resvg = "0.48.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.1"
+symphonia = { version = "0.6.1", features = ["aac", "isomp4", "mp3"] }
+tempfile = "3.27.0"
+tiny-skia = "0.12.0"
+tokio = { version = "1.53.3", features = ["full"] }
+toml = "1.1.8+spec-1.1.0"
+usvg = "0.48.1"
+vorbis_rs = "0.5.6"
+
+[dev-dependencies]
+http = "1.5.0"
+oxipng = "10.2.1"
+serial_test = "4.0.1"
+
+# Audio and image codecs are unusably slow at opt-level 0. Keep dependencies
+# optimized in dev builds so `cargo run -- sync` performs like a release
+# build; Tungsten's own code still compiles fast and stays debuggable.
+[profile.dev.package."*"]
+opt-level = 3
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"
-lto      = "thin"
+lto = "thin"

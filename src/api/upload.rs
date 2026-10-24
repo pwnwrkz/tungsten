@@ -1,3 +1,5 @@
+//! Roblox Open Cloud API upload client: rate-limited, retrying multipart asset uploads.
+
 use anyhow::{Context, Result, bail};
 use bytes::Bytes;
 use reqwest::{Client, StatusCode, multipart};
@@ -44,7 +46,12 @@ pub struct UploadParams {
 }
 
 impl RobloxClient {
-    pub fn new(api_key: String) -> Self {
+    /// Create a new client for uploading assets.
+    ///
+    /// `max_concurrent_uploads` controls both the upload semaphore (in the sync
+    /// pipeline) and the HTTP connection pool size, so they stay in sync and
+    /// we don't drop and re-establish connections when concurrency is high.
+    pub fn new(api_key: String, max_concurrent_uploads: usize) -> Self {
         let mut default_headers = reqwest::header::HeaderMap::new();
         default_headers.insert(
             "x-api-key",
@@ -54,8 +61,8 @@ impl RobloxClient {
 
         let client = Client::builder()
             // Keep at least as many idle connections as the upload concurrency
-            // limit (default 10) to avoid connection thrashing.
-            .pool_max_idle_per_host(10)
+            // limit to avoid connection thrashing.
+            .pool_max_idle_per_host(max_concurrent_uploads.max(1))
             // Set the API key once instead of per-request.
             .default_headers(default_headers)
             .build()

@@ -1,8 +1,11 @@
+//! Asset taxonomy: formats, kinds, extension mapping, `.tmeta` metadata, SVG scale resolution.
+
 use anyhow::{Context, Result};
 use rbx_binary::from_reader;
 use rbx_xml::from_reader as xml_from_reader;
 use serde::Deserialize;
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 // Asset types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +22,16 @@ pub enum AudioFormat {
     Ogg,
     Flac,
     Wav,
+    M4a,
+}
+
+impl AudioFormat {
+    /// Whether Roblox's upload API accepts this format directly.
+    /// Roblox accepts MP3, OGG, WAV and FLAC; M4A/AAC sources should be
+    /// transcoded to OGG before upload.
+    pub fn roblox_supported(&self) -> bool {
+        !matches!(self, AudioFormat::M4a)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +85,7 @@ impl AssetKind {
             AssetKind::Audio(AudioFormat::Ogg) => "audio/ogg",
             AssetKind::Audio(AudioFormat::Flac) => "audio/flac",
             AssetKind::Audio(AudioFormat::Wav) => "audio/wav",
+            AssetKind::Audio(AudioFormat::M4a) => "audio/mp4",
 
             AssetKind::Model(ModelFormat::Fbx) => "model/fbx",
             AssetKind::Model(ModelFormat::GltfJson) => "model/gltf+json",
@@ -104,6 +118,7 @@ pub fn kind_from_ext(ext: &str) -> Option<AssetKind> {
         "ogg" => Some(AssetKind::Audio(AudioFormat::Ogg)),
         "flac" => Some(AssetKind::Audio(AudioFormat::Flac)),
         "wav" => Some(AssetKind::Audio(AudioFormat::Wav)),
+        "m4a" | "aac" => Some(AssetKind::Audio(AudioFormat::M4a)),
 
         "fbx" => Some(AssetKind::Model(ModelFormat::Fbx)),
         "gltf" => Some(AssetKind::Model(ModelFormat::GltfJson)),
@@ -190,6 +205,13 @@ pub struct AssetMeta {
     pub name: Option<String>,
     /// Overrides the description sent to Roblox.
     pub description: Option<String>,
+    /// Optional override for the asset type sent to Roblox's API.
+    /// Mirrors the input-level `type` config field: `"auto"` is treated as
+    /// no override, and any other value takes precedence over the input-level
+    /// override. For `.rbxm`/`.rbxmx` files, `"animation"` or `"model"` also
+    /// pin the kind and skip the DOM parse used to auto-detect animations.
+    #[serde(rename = "type")]
+    pub asset_type: Option<String>,
 }
 
 impl AssetMeta {
@@ -252,6 +274,126 @@ impl AssetMeta {
     pub fn resolve_description<'a>(&'a self, fallback: &'a str) -> &'a str {
         self.description.as_deref().unwrap_or(fallback)
     }
+
+    /// Final API asset type override. `None` means derive it from the asset
+    /// kind; `"auto"` is treated as `None`.
+    ///
+    /// `"animation"` and `"model"` are kind pins (see [`Self::pinned_model_kind`])
+    /// rather than API types, so they are not forwarded as an override — the
+    /// pinned kind already yields the correct `"Model"` API type.
+    pub fn resolve_asset_type(&self) -> Option<&str> {
+        match self.asset_type.as_deref() {
+            Some(s)
+                if s.eq_ignore_ascii_case("auto")
+                    || s.eq_ignore_ascii_case("animation")
+                    || s.eq_ignore_ascii_case("model") =>
+            {
+                None
+            }
+            Some(s) => Some(s),
+            None => None,
+        }
+    }
+
+    /// The pinned kind for a `.rbxm`/`.rbxmx` file when `type` is
+    /// `"animation"` or `"model"`. `None` means unpinned — fall back to DOM
+    /// auto-detection.
+    pub fn pinned_model_kind(&self) -> Option<AssetKind> {
+        match self.asset_type.as_deref() {
+            Some(s) if s.eq_ignore_ascii_case("animation") => Some(AssetKind::Animation),
+            Some(s) if s.eq_ignore_ascii_case("model") => {
+                Some(AssetKind::Model(ModelFormat::Roblox))
+            }
+            _ => None,
+        }
+    }
+}
+
+// SVG scale resolution from `.tmeta` sidecars
+
+/// Minimum SVG rasterization scale.
+const MIN_SVG_SCALE: f32 = 0.01;
+
+/// Memoization cache for `.tmeta` `svg_scale` lookups, so a directory's meta
+/// file is read once per sync instead of once per SVG.
+pub type SvgScaleCache = std::sync::Mutex<HashMap<PathBuf, Option<f32>>>;
+
+/// Create an empty `SvgScaleCache`.
+pub fn new_svg_scale_cache() -> SvgScaleCache {
+    SvgScaleCache::new(HashMap::new())
+}
+
+/// The effective SVG rasterization scale for `file_path`, walking from the file
+/// up to (and including) the input's `base_path`. The nearest ancestor with an
+/// `svg_scale` in its `.tmeta` wins; otherwise the input's configured scale (or
+/// `1.0`) is used. Clamped to a minimum of [`MIN_SVG_SCALE`].
+pub fn effective_svg_scale_for_path(
+    file_path: &Path,
+    base_path: &str,
+    configured_scale: Option<f32>,
+    cache: &SvgScaleCache,
+) -> f32 {
+    let base = Path::new(base_path);
+    for anc in file_path.ancestors() {
+        if !anc.starts_with(base) {
+            break;
+        }
+        if let Some(scale) = svg_scale_from_tmeta(anc, cache) {
+            return scale.max(MIN_SVG_SCALE);
+        }
+        if anc == base {
+            break;
+        }
+    }
+    configured_scale.unwrap_or(1.0).max(MIN_SVG_SCALE)
+}
+
+fn svg_scale_from_tmeta(item: &Path, cache: &SvgScaleCache) -> Option<f32> {
+    fn read_cached(path: &Path, cache: &SvgScaleCache) -> Option<f32> {
+        let mut guard = cache.lock().unwrap();
+        if let Some(&v) = guard.get(path) {
+            return v;
+        }
+        let v = try_read_tmeta_svg_scale(path);
+        guard.insert(path.to_path_buf(), v);
+        v
+    }
+
+    if item.is_file() {
+        if let Some(ext) = item.extension() {
+            let mut path = item.to_path_buf();
+            path.set_extension(format!("{}.tmeta", ext.to_string_lossy()));
+            if let Some(scale) = read_cached(&path, cache) {
+                return Some(scale);
+            }
+        }
+        let mut path = item.to_path_buf();
+        path.set_extension("tmeta");
+        if let Some(scale) = read_cached(&path, cache) {
+            return Some(scale);
+        }
+    } else {
+        let dir_name = item.file_name()?.to_os_string();
+        let mut parent = item.parent()?.to_path_buf();
+        parent.push(dir_name);
+        parent.set_extension("tmeta");
+        if let Some(scale) = read_cached(&parent, cache) {
+            return Some(scale);
+        }
+    }
+    None
+}
+
+/// Read `svg_scale` from a single `.tmeta` file, or `None` if absent/unreadable.
+fn try_read_tmeta_svg_scale(path: &Path) -> Option<f32> {
+    std::fs::read_to_string(path).ok().and_then(|contents| {
+        let map: toml::Value = toml::from_str(&contents).ok()?;
+        match map.get("svg_scale") {
+            Some(toml::Value::Float(v)) => Some(*v as f32),
+            Some(toml::Value::Integer(v)) => Some(*v as f32),
+            _ => None,
+        }
+    })
 }
 
 // Tests
@@ -296,6 +438,25 @@ mod tests {
             kind_from_ext("wav"),
             Some(AssetKind::Audio(AudioFormat::Wav))
         );
+        assert_eq!(
+            kind_from_ext("m4a"),
+            Some(AssetKind::Audio(AudioFormat::M4a))
+        );
+        assert_eq!(
+            kind_from_ext("aac"),
+            Some(AssetKind::Audio(AudioFormat::M4a))
+        );
+    }
+
+    #[test]
+    fn test_roblox_supported_audio_formats() {
+        // Roblox accepts MP3, OGG, WAV and FLAC directly; only M4A/AAC is
+        // reliably rejected and should be transcoded to OGG.
+        assert!(AudioFormat::Mp3.roblox_supported());
+        assert!(AudioFormat::Ogg.roblox_supported());
+        assert!(AudioFormat::Wav.roblox_supported());
+        assert!(AudioFormat::Flac.roblox_supported());
+        assert!(!AudioFormat::M4a.roblox_supported());
     }
 
     #[test]
@@ -319,6 +480,7 @@ mod tests {
     fn test_mime_types() {
         assert_eq!(AssetKind::Image(ImageFormat::Png).mime(), "image/png");
         assert_eq!(AssetKind::Audio(AudioFormat::Mp3).mime(), "audio/mpeg");
+        assert_eq!(AssetKind::Audio(AudioFormat::M4a).mime(), "audio/mp4");
         assert_eq!(AssetKind::Model(ModelFormat::Fbx).mime(), "model/fbx");
     }
 
@@ -327,6 +489,48 @@ mod tests {
         let meta = AssetMeta::default();
         assert_eq!(meta.resolve_name("fallback"), "fallback");
         assert_eq!(meta.resolve_description("desc"), "desc");
+        assert_eq!(meta.resolve_asset_type(), None);
+    }
+
+    #[test]
+    fn test_resolve_asset_type_treats_auto_as_none() {
+        let meta = AssetMeta {
+            asset_type: Some("auto".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(meta.resolve_asset_type(), None);
+
+        // Casing of the sentinel does not matter.
+        let meta = AssetMeta {
+            asset_type: Some("Auto".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(meta.resolve_asset_type(), None);
+
+        // Any other value is passed through verbatim.
+        let meta = AssetMeta {
+            asset_type: Some("Decal".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(meta.resolve_asset_type(), Some("Decal"));
+    }
+
+    #[test]
+    fn test_meta_file_parses_type_field() {
+        use std::fs::File;
+        use std::io::Write;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.png");
+        File::create(&file_path).unwrap();
+
+        let meta_path = temp_dir.path().join("test.png.tmeta");
+        let mut meta_file = File::create(&meta_path).unwrap();
+        writeln!(meta_file, "type = \"Decal\"").unwrap();
+
+        let meta = AssetMeta::load_for(&file_path).unwrap();
+        assert_eq!(meta.resolve_asset_type(), Some("Decal"));
     }
 
     #[test]

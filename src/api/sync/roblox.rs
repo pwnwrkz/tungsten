@@ -1,3 +1,5 @@
+//! Roblox creator targeting (user/group) for cloud uploads.
+
 use serde::{Deserialize, Serialize};
 
 /// Request body sent when uploading an asset.
