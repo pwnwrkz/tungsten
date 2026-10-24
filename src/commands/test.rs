@@ -1,3 +1,5 @@
+//! `tungsten test` — validates a config end-to-end without uploading.
+
 use anyhow::Result;
 use bytes::Bytes;
 use std::sync::Arc;
@@ -112,7 +114,7 @@ pub async fn run(config: Config, api_key: Option<String>) -> Result<()> {
 
         log!(info, "Uploading test asset (1×1 transparent PNG)...");
 
-        let client = Arc::new(RobloxClient::new(key));
+        let client = Arc::new(RobloxClient::new(key, 10));
 
         match client
             .upload(UploadParams {
@@ -129,7 +131,7 @@ pub async fn run(config: Config, api_key: Option<String>) -> Result<()> {
             .await
         {
             Ok(id) => {
-                log!(success, "Upload succeeded! (rbxassetid://{})", id);
+                log!(success, "Upload complete (rbxassetid://{})", id);
                 log!(
                     info,
                     "Note: This asset will remain in your Roblox inventory"

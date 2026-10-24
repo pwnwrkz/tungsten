@@ -1,3 +1,5 @@
+//! Environment resolution (API key sources, working dir).
+
 use std::env;
 
 use crate::log;

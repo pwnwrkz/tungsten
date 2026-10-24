@@ -16,3 +16,4 @@ type = "image"
 path = "assets/models/**/*"
 output_path = "src/models.luau"
 type = "model"
+

@@ -1,8 +1,9 @@
+//! `tungsten sync` — collects inputs, routes them to pack/individual/raw processors, dispatches uploads.
+
 pub mod codegen_write;
 pub mod dispatch;
 pub mod dpi;
-pub mod encode;
-pub mod error;
+pub mod dpi_groups;
 pub mod individual;
 pub mod packed;
 pub mod paths;
@@ -21,12 +22,14 @@ use crate::api::sync::studio::StudioSync;
 use crate::api::upload::RobloxClient;
 use crate::core::assets::asset::{self, stem_name};
 use crate::core::assets::img::pack;
+use crate::core::postsync::codegen::parse_dpi_suffix;
 use crate::core::postsync::lockfile::Lockfile;
 use crate::log;
 use crate::utils::config::Config;
 use crate::utils::env::resolve_api_key;
 use crate::utils::logger::{clear_progress_line, progress};
 
+use dispatch::{ResolvedCodegen, SyncContext};
 use individual::process_individual;
 use packed::process_packed;
 use paths::{collect_paths, glob_base, load_input_meta};
@@ -40,7 +43,7 @@ pub enum Target {
     Cloud,
     /// Copy assets into Roblox Studio's content folder for live preview.
     Studio,
-    /// Copy assets into `.tungsten-debug/` for local inspection.
+    /// Copy assets into `.tungsten_debug/` for local inspection.
     Debug,
 }
 
@@ -63,11 +66,20 @@ pub async fn run(
     dry_run: bool,
 ) -> Result<()> {
     let api_key = resolve_api_key(api_key);
+    crate::utils::trace::mark("api key resolved");
     let mut total_errors: u32 = 0;
+    let max_concurrent_uploads = config.max_concurrent_uploads;
 
-    log!(debug, "Sync target: {:?}, dry_run={}", target, dry_run);
+    log!(
+        debug,
+        "Sync target: {:?}, dry_run={}, max_concurrent_uploads={}",
+        target,
+        dry_run,
+        max_concurrent_uploads
+    );
 
     let mut lockfile = Lockfile::load().context("Failed to load lockfile")?;
+    crate::utils::trace::mark("lockfile loaded");
 
     if dry_run {
         log!(info, "Dry run — no uploads or file copies will occur");
@@ -83,7 +95,10 @@ pub async fn run(
                  with \"Assets: Read & Write\" permissions"
             )
         })?;
-        Some(Arc::new(RobloxClient::new(key.to_string())))
+        Some(Arc::new(RobloxClient::new(
+            key.to_string(),
+            max_concurrent_uploads,
+        )))
     } else {
         None
     };
@@ -124,29 +139,29 @@ pub async fn run(
         None
     };
 
-    let mut studio_expected_files_storage = HashSet::new();
-    let mut studio_expected_files = if target == Target::Studio {
-        Some(&mut studio_expected_files_storage)
-    } else {
-        None
-    };
-
     let creator = make_creator(config)?;
+    crate::utils::trace::mark("target syncers ready");
 
+    // Accumulates every file copied into the Studio folder, across all
+    // inputs; stale-file cleanup after the run removes anything not here.
+    let mut studio_expected_files = HashSet::new();
+
+    // Global codegen defaults (per-input overrides live on each `InputConfig`).
     let codegen_cfg = config.codegen.as_ref();
-    let codegen_style = codegen_cfg
-        .map(|c| c.resolved_style().to_string())
-        .unwrap_or_else(|| "flat".to_string());
-    let strip_extension = codegen_cfg
-        .map(|c| c.resolved_strip_extension())
-        .unwrap_or(false);
-    let ts_declaration = codegen_cfg
-        .map(|c| c.resolved_ts_declaration())
-        .unwrap_or(false);
-
-    let max_concurrent_uploads = config.max_concurrent_uploads;
-
-    log!(debug, "max_concurrent_uploads={}", max_concurrent_uploads);
+    let codegen = ResolvedCodegen {
+        style: codegen_cfg
+            .map(|c| c.resolved_style().to_string())
+            .unwrap_or_else(|| "flat".to_string()),
+        strip_extension: codegen_cfg
+            .map(|c| c.resolved_strip_extension())
+            .unwrap_or(false),
+        ts_declaration: codegen_cfg
+            .map(|c| c.resolved_ts_declaration())
+            .unwrap_or(false),
+        strip_whitespace: codegen_cfg
+            .map(|c| c.resolved_strip_whitespace())
+            .unwrap_or(false),
+    };
 
     for (input_name, input) in &config.inputs {
         log!(section, "SYNCING \"{}\"", input_name);
@@ -170,10 +185,13 @@ pub async fn run(
         };
 
         log!(info, "{} file(s) found", paths.len());
+        crate::utils::trace::mark(&format!("paths collected for input \"{}\"", input_name));
 
         let base_path = glob_base(&input.path);
         let compress_options = input.resolved_compress_options();
         let compress_opts_ref = compress_options.as_ref();
+        let audio_options = input.resolved_audio_options();
+        let audio_opts_ref = audio_options.as_ref();
         let bleed = input.resolved_bleed();
 
         let (image_paths, other_paths): (Vec<_>, Vec<_>) = paths.into_iter().partition(|p| {
@@ -186,30 +204,32 @@ pub async fn run(
 
         // Non-image assets (audio, models)
         if !other_paths.is_empty() {
-            let asset_type_override = resolve_asset_type_override(input.asset_type.as_deref());
-            let errs = process_raw(
+            let asset_type_override =
+                resolve_asset_type_override(input.asset_type.as_deref()).map(|s| s.to_string());
+            let mut ctx = SyncContext::new(
                 input_name,
-                other_paths,
                 &base_path,
                 &input.output_path,
-                &codegen_style,
-                strip_extension,
-                ts_declaration,
-                compress_opts_ref,
                 target,
                 dry_run,
                 &creator,
-                asset_type_override,
                 &client,
                 &studio_sync,
                 &debug_sync,
                 &mut lockfile,
                 &mut studio_expected_files,
                 max_concurrent_uploads,
+                codegen.clone(),
+                asset_type_override,
+            );
+            total_errors += process_raw(
+                &mut ctx,
+                other_paths,
+                compress_opts_ref,
+                audio_opts_ref,
                 &input.web,
             )
             .await;
-            total_errors += errs;
         }
 
         // Image assets
@@ -224,67 +244,109 @@ pub async fn run(
             let svg_paths_owned: Vec<PathBuf> = svg_paths.into_iter().cloned().collect();
             let raster_paths_owned: Vec<PathBuf> = raster_paths.into_iter().cloned().collect();
 
-            // Rasterize SVGs in parallel (offloaded to blocking pool).
-            let svg_images: Vec<pack::InputImage> = {
-                let base = base_path.clone();
-                let svg_paths_vec = svg_paths_owned.clone();
-                let svg_scale_opt = input.svg_scale;
-                let base_path_str = base_path.to_string();
-                // Shared `.tmeta` read cache so each directory's metadata file
-                // is parsed once instead of once per SVG.
-                let svg_scale_cache =
-                    std::sync::Arc::new(crate::utils::config::new_svg_scale_cache());
-
-                tokio::task::spawn_blocking(move || {
-                    use rayon::prelude::*;
-                    let svg_total = svg_paths_vec.len();
-                    let counter = std::sync::atomic::AtomicUsize::new(0);
-                    svg_paths_vec
-                        .par_iter()
-                        .filter_map(|path| {
-                            let data = std::fs::read(path).ok()?;
-                            let rel = path.strip_prefix(&base).unwrap_or(path).to_string_lossy();
-                            let name = stem_name(&rel);
-                            // Compute effective SVG scale (reads .tmeta files)
-                            let scale =
-                                crate::utils::config::InputConfig::effective_svg_scale_for_path(
-                                    path,
-                                    &base_path_str,
-                                    svg_scale_opt,
-                                    &svg_scale_cache,
-                                );
-                            // Rasterize straight to RGBA, skipping a PNG roundtrip.
-                            let image =
-                                crate::core::assets::img::convert::svg_to_rgba(&data, scale)
-                                    .map_err(|e| {
-                                        clear_progress_line();
-                                        log!(
-                                            warn,
-                                            "Failed to rasterize \"{}\": {}",
-                                            path.display(),
-                                            e
-                                        );
-                                        e
-                                    })
-                                    .ok()?;
-                            let done =
-                                counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                            progress("Rasterizing", done, svg_total, &name);
-                            Some(pack::InputImage {
-                                name: name.to_string(),
-                                image,
-                            })
-                        })
-                        .collect()
-                })
-                .await
-                .expect("spawn_blocking panicked")
-            };
+            let asset_type_override =
+                resolve_asset_type_override(input.asset_type.as_deref()).map(|s| s.to_string());
+            let mut ctx = SyncContext::new(
+                input_name,
+                &base_path,
+                &input.output_path,
+                target,
+                dry_run,
+                &creator,
+                &client,
+                &studio_sync,
+                &debug_sync,
+                &mut lockfile,
+                &mut studio_expected_files,
+                max_concurrent_uploads,
+                codegen.clone(),
+                asset_type_override,
+            );
 
             let errs = if input.packable.unwrap_or(false) {
                 // Packed: every image must be decoded up front for bin-packing
                 // and atlas compositing (decode concurrency is chunk-bounded in
                 // `pack::load_images`).
+                let uniform = if input.resolved_uniform_cells() {
+                    let fit = match pack::CellFit::parse(input.resolved_cell_fit()) {
+                        Ok(f) => f,
+                        Err(e) => {
+                            log!(warn, "Invalid cell_fit for \"{}\": {}", input_name, e);
+                            total_errors += 1;
+                            continue;
+                        }
+                    };
+                    Some(pack::UniformOptions {
+                        cell_size: input.cell_size.map(|c| c.dims()),
+                        fit,
+                    })
+                } else {
+                    None
+                };
+
+                // Rasterize SVGs in parallel (offloaded to blocking pool).
+                let svg_images: Vec<pack::InputImage> = {
+                    let base = base_path.clone();
+                    let svg_paths_vec = svg_paths_owned.clone();
+                    let svg_scale_opt = input.svg_scale;
+                    let base_path_str = base_path.to_string();
+                    // Shared `.tmeta` read cache so each directory's metadata file
+                    // is parsed once instead of once per SVG.
+                    let svg_scale_cache = std::sync::Arc::new(asset::new_svg_scale_cache());
+
+                    tokio::task::spawn_blocking(move || {
+                        use rayon::prelude::*;
+                        let svg_total = svg_paths_vec.len();
+                        let counter = std::sync::atomic::AtomicUsize::new(0);
+                        svg_paths_vec
+                            .par_iter()
+                            .filter_map(|path| {
+                                let data = std::fs::read(path).ok()?;
+                                let rel =
+                                    path.strip_prefix(&base).unwrap_or(path).to_string_lossy();
+                                let name = stem_name(&rel);
+                                // Compute effective SVG scale (reads .tmeta files)
+                                let dpi_factor = parse_dpi_suffix(&name).unwrap_or(1) as f32;
+                                let scale = asset::effective_svg_scale_for_path(
+                                    path,
+                                    &base_path_str,
+                                    svg_scale_opt,
+                                    &svg_scale_cache,
+                                ) * dpi_factor;
+                                // Rasterize straight to RGBA, skipping a PNG roundtrip.
+                                let image =
+                                    crate::core::assets::img::convert::svg_to_rgba(&data, scale)
+                                        .map_err(|e| {
+                                            clear_progress_line();
+                                            log!(
+                                                warn,
+                                                "Failed to rasterize \"{}\": {}",
+                                                path.display(),
+                                                e
+                                            );
+                                            e
+                                        })
+                                        .ok()?;
+                                let done =
+                                    counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                                progress("Rasterizing", done, svg_total, &name);
+                                Some(pack::InputImage {
+                                    name: name.to_string(),
+                                    image,
+                                    source_hash: crate::core::postsync::lockfile::hash_bytes(&data),
+                                })
+                            })
+                            .collect()
+                    })
+                    .await
+                    .expect("spawn_blocking panicked")
+                };
+                crate::utils::trace::mark(&format!(
+                    "svg rasterized for input \"{}\" ({} images)",
+                    input_name,
+                    svg_images.len()
+                ));
+
                 let base_path_owned = base_path.to_string();
                 let mut images = match tokio::task::spawn_blocking(move || {
                     pack::load_images(raster_paths_owned, &base_path_owned)
@@ -311,66 +373,28 @@ pub async fn run(
                 }
 
                 let sheet_meta = load_input_meta(&base_path);
-                let asset_type_override = resolve_asset_type_override(input.asset_type.as_deref());
                 process_packed(
-                    input_name,
+                    &mut ctx,
                     &sheet_meta,
                     images,
-                    &input.output_path,
-                    &codegen_style,
-                    strip_extension,
-                    ts_declaration,
                     compress_opts_ref,
                     bleed,
-                    target,
-                    dry_run,
-                    &creator,
-                    asset_type_override,
-                    &client,
-                    &studio_sync,
-                    &debug_sync,
-                    &mut lockfile,
-                    &mut studio_expected_files,
-                    max_concurrent_uploads,
+                    uniform.as_ref(),
                     &input.web,
-                    &base_path,
                 )
                 .await
             } else {
-                // Individual: raster files are decoded lazily inside the
-                // processing loop so memory stays bounded by processing
-                // concurrency instead of holding every decoded image at once.
-                if svg_images.is_empty() && raster_paths_owned.is_empty() {
-                    log!(
-                        warn,
-                        "No images could be loaded for \"{}\" — skipping",
-                        input_name
-                    );
-                    continue;
-                }
-                let asset_type_override = resolve_asset_type_override(input.asset_type.as_deref());
+                // Individual: SVGs stay on disk and are rasterized lazily inside
+                // the processor (alongside the parallel decode/encode pass), so
+                // the first asset is written as soon as the first image is ready
+                // instead of after every SVG is rasterized.
                 process_individual(
-                    input_name,
-                    svg_images,
+                    &mut ctx,
                     svg_paths_owned,
                     raster_paths_owned,
-                    &base_path,
-                    &input.output_path,
-                    &codegen_style,
-                    strip_extension,
-                    ts_declaration,
                     compress_opts_ref,
                     bleed,
-                    target,
-                    dry_run,
-                    &creator,
-                    asset_type_override,
-                    &client,
-                    &studio_sync,
-                    &debug_sync,
-                    &mut lockfile,
-                    &mut studio_expected_files,
-                    max_concurrent_uploads,
+                    input.svg_scale,
                     &input.web,
                 )
                 .await
@@ -388,53 +412,58 @@ pub async fn run(
     if target == Target::Studio
         && let Some(studio_sync) = &studio_sync
     {
-        let expected_files = &studio_expected_files_storage;
-        let sync_path = studio_sync.sync_path();
+        let expected_files = studio_expected_files.clone();
+        let sync_path = studio_sync.sync_path().to_path_buf();
 
-        // Safely collect actual files (only files, not directories)
-        let actual_files: HashSet<String> = match fs::read_dir(sync_path) {
-            Ok(read_dir) => read_dir
-                .filter_map(|entry| {
-                    let entry = match entry {
-                        Ok(e) => e,
-                        Err(e) => {
-                            log!(warn, "Failed to read directory entry: {}", e);
-                            return None;
+        // Directory walk + stale-file removal off the async runtime (S3).
+        tokio::task::spawn_blocking(move || {
+            // Safely collect actual files (only files, not directories)
+            let actual_files: HashSet<String> = match fs::read_dir(&sync_path) {
+                Ok(read_dir) => read_dir
+                    .filter_map(|entry| {
+                        let entry = match entry {
+                            Ok(e) => e,
+                            Err(e) => {
+                                log!(warn, "Failed to read directory entry: {}", e);
+                                return None;
+                            }
+                        };
+                        let path = entry.path();
+                        if path.is_file() {
+                            path.file_name()
+                                .and_then(|n| n.to_str())
+                                .map(|s| s.to_string())
+                        } else {
+                            None
                         }
-                    };
-                    let path = entry.path();
-                    if path.is_file() {
-                        path.file_name()
-                            .and_then(|n| n.to_str())
-                            .map(|s| s.to_string())
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
-            Err(e) => {
-                log!(
-                    warn,
-                    "Failed to read sync directory {}: {}",
-                    sync_path.display(),
-                    e
-                );
-                HashSet::new()
-            }
-        };
+                    })
+                    .collect(),
+                Err(e) => {
+                    log!(
+                        warn,
+                        "Failed to read sync directory {}: {}",
+                        sync_path.display(),
+                        e
+                    );
+                    HashSet::new()
+                }
+            };
 
-        // Remove files that are not in our expected set
-        for file in actual_files.difference(expected_files) {
-            let file_path = sync_path.join(file);
-            if let Err(e) = fs::remove_file(&file_path) {
-                log!(
-                    warn,
-                    "Failed to remove stale Studio sync file '{}': {}",
-                    file,
-                    e
-                );
+            // Remove files that are not in our expected set
+            for file in actual_files.difference(&expected_files) {
+                let file_path = sync_path.join(file);
+                if let Err(e) = fs::remove_file(&file_path) {
+                    log!(
+                        warn,
+                        "Failed to remove stale Studio sync file '{}': {}",
+                        file,
+                        e
+                    );
+                }
             }
-        }
+        })
+        .await
+        .expect("spawn_blocking panicked");
     }
 
     log!(section, "SUMMARY");
@@ -445,7 +474,7 @@ pub async fn run(
             total_errors
         );
     } else {
-        log!(success, "All assets synced successfully");
+        log!(success, "All assets synced");
     }
 
     Ok(())

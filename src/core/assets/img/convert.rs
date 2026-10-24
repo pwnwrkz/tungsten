@@ -1,8 +1,7 @@
+//! Image format conversion: raster decode, SVG rasterization, canonical encoders.
+
 use anyhow::{Context, Result};
 use image::RgbaImage;
-use resvg;
-use tiny_skia;
-use usvg;
 
 use super::super::asset::ImageFormat;
 
@@ -90,6 +89,12 @@ pub fn convert_image(image: &RgbaImage, target: ImageFormat) -> Result<Vec<u8>> 
     Ok(buf)
 }
 
+/// Encode an `RgbaImage` as PNG — the canonical single-purpose PNG encoder
+/// used across the sync pipeline (DPI variants, spritesheets, packed sheets).
+pub fn encode_png(image: &RgbaImage) -> Result<Vec<u8>> {
+    convert_image(image, ImageFormat::Png)
+}
+
 /// Decode raw image bytes and re-encode to `target` format.
 pub fn transcode_image(data: &[u8], target: ImageFormat) -> Result<Vec<u8>> {
     let image = image::load_from_memory(data)
@@ -136,7 +141,12 @@ fn flatten_alpha(src: &RgbaImage) -> image::RgbImage {
     // Formula: out = (src * a + 255 * (255 - a)) / 255
     let src_raw = src.as_raw();
     let dst_raw = out.as_mut();
-    for (src_chunk, dst_chunk) in src_raw.chunks_exact(4).zip(dst_raw.chunks_exact_mut(3)) {
+    for (src_chunk, dst_chunk) in src_raw
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(dst_raw.as_chunks_mut::<3>().0.iter_mut())
+    {
         let a = src_chunk[3] as u16;
         let inv_a = 255 - a;
         // Integer division by 255 is ~20-30 cycles on x86; the exact bitwise

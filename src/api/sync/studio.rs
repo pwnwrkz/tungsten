@@ -1,9 +1,10 @@
+//! Studio sync backend: copies assets into Roblox Studio's content folder with `rbxasset://` URIs.
+
 use anyhow::{Context, Result};
 use rbx_install::RobloxStudio;
-use reqwest;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 /// A handle to the Roblox Studio content folder for this project.
 /// Assets are copied into `.tungsten_{project}/` using their original
@@ -28,6 +29,29 @@ impl StudioSync {
     /// https://setup.roblox.com/versionQTStudio and appended to the path.
     /// Does not wipe previous contents to allow incremental sync and preserve
     /// assets between Studio version updates.
+    /// Fetches the latest Roblox Studio version from the setup endpoint.
+    /// Cached after the first fetch so watch-mode re-syncs don't hit the network
+    /// on every cycle.
+    async fn fetch_latest_version() -> Result<String> {
+        // Static cache: once fetched and stored as Ok, returned directly.
+        // On error we don't cache so the next attempt can retry.
+        static VERSION: OnceLock<String> = OnceLock::new();
+        if let Some(cached) = VERSION.get() {
+            return Ok(cached.clone());
+        }
+        let version = reqwest::get("https://setup.roblox.com/versionQTStudio")
+            .await
+            .context("Failed to fetch latest Roblox Studio version")?
+            .text()
+            .await
+            .context("Failed to read version response")?
+            .trim()
+            .to_string();
+        let version_clone = version.clone();
+        VERSION.set(version_clone).ok();
+        Ok(version)
+    }
+
     pub async fn new(
         studio_path_override: Option<String>,
         auto_route_version: bool,
@@ -42,15 +66,8 @@ impl StudioSync {
 
         let content_path = if auto_route_version {
             let mut path = base_path;
-            // Fetch the latest version from Roblox (async)
-            let version = reqwest::get("https://setup.roblox.com/versionQTStudio")
-                .await
-                .context("Failed to fetch latest Roblox Studio version")?
-                .text()
-                .await
-                .context("Failed to read version response")?
-                .trim()
-                .to_string();
+            // Fetch the latest version from Roblox (async, cached per process).
+            let version = Self::fetch_latest_version().await?;
 
             // Append "Versions/<version>" to the base path.
             // Try capital "Versions" (Windows) first, then lowercase "versions" (Linux/Wine).

@@ -1,3 +1,5 @@
+//! Console logging and progress-line rendering.
+
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -96,15 +98,20 @@ pub fn progress(phase: &str, current: usize, total: usize, item: &str) {
 
     if current >= total {
         // Finalize: overwrite with a clean ✓ line and move to the next line.
+        // The trailing item column is padded with spaces so it erases any
+        // leftover name from the previous in-progress line (`\r` alone does
+        // not clear already-drawn characters).
         let done_line = format!(
-            "{} {:<phase_w$} [{}] {}  {}/{}",
+            "{} {:<phase_w$} [{}] {}  {}/{}  {:<item_w$}",
             " SUCCESS ".on_green().black().bold(),
             phase.cyan().bold(),
             "█".repeat(BAR_WIDTH).green().bold(),
             "100%".green(),
             total_str.bold(),
             total_str.bold(),
+            "",
             phase_w = PHASE_WIDTH,
+            item_w = ITEM_WIDTH,
         );
         println!("\r{}", done_line);
     } else {

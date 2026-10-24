@@ -1,27 +1,25 @@
-use std::collections::{HashMap, HashSet};
+//! DPI-variant processing: `@2x`/`@3x` siblings collapse into one codegen entry per scale set.
+
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use rayon::prelude::*;
-use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
-use crate::api::sync::debug::DebugSync;
-use crate::api::sync::roblox::Creator;
-use crate::api::sync::studio::StudioSync;
-use crate::api::upload::{RobloxClient, UploadParams};
 use crate::core::assets::asset::{AssetKind, ImageFormat};
 use crate::core::assets::img::alpha_bleed::alpha_bleed;
 use crate::core::assets::img::compress::{CompressOptions, maybe_compress_png};
 use crate::core::postsync::codegen::CodegenEntry;
-use crate::core::postsync::lockfile::{Lockfile, hash_image};
+use crate::core::postsync::lockfile::hash_bytes;
 use crate::log;
 use crate::utils::logger::{clear_progress_line, progress};
 
 use super::Target;
-use super::dispatch::{copy_to_debug, copy_to_studio};
-use super::encode::{DpiGroups, encode_png};
+use super::dispatch::{SyncContext, copy_to_debug, copy_to_studio};
+use super::dpi_groups::DpiGroups;
+use crate::core::assets::img::convert::encode_png;
 
 /// Process a set of DPI groups end-to-end: encode/bleed/compress/hash each
 /// variant in parallel, then upload/copy per target, and push exactly one
@@ -30,32 +28,21 @@ use super::encode::{DpiGroups, encode_png};
 /// Shared by `individual.rs` and `packed.rs` so both code paths emit one
 /// codegen entry per base — previously cache hits emitted one entry per
 /// variant, producing duplicate/nondeterministic keys.
-#[allow(clippy::too_many_arguments)]
 pub async fn process_dpi_groups(
-    input_name: &str,
+    ctx: &mut SyncContext<'_>,
     dpi_groups: DpiGroups,
     bleed: bool,
     compress_options: Option<&CompressOptions>,
-    target: Target,
-    dry_run: bool,
-    creator: &Creator,
-    asset_type: Option<&str>,
-    client: &Option<Arc<RobloxClient>>,
-    studio_sync: &Option<Arc<StudioSync>>,
-    debug_sync: &Option<Arc<DebugSync>>,
-    lockfile: &mut Lockfile,
-    studio_expected_files: &mut Option<&mut HashSet<String>>,
-    max_concurrent_uploads: usize,
     codegen_entries: &mut Vec<CodegenEntry>,
 ) -> u32 {
-    let mut errors: u32 = 0;
+    let target = ctx.target;
+    let errors_start = ctx.errors;
 
     if dpi_groups.is_empty() {
-        return errors;
+        return 0;
     }
 
     // 1. Pre-process every variant in parallel: bleed, encode, compress, hash (offloaded to blocking pool)
-    let bleed_flag = bleed;
     // Owned copy so the `'static` blocking closure doesn't capture a borrowed
     // reference into the async context.
     let compress_opts = compress_options.cloned();
@@ -68,53 +55,79 @@ pub async fn process_dpi_groups(
         })
         .collect();
 
-    // `(base_name, scale, bytes, hash)` per variant.
-    let tasks: Vec<(String, u8, Vec<u8>, String)> = tokio::task::spawn_blocking(move || {
-        dpi_groups_vec
-            .into_par_iter()
-            .filter_map(|(base_name, scale, img)| {
-                let mut rgba = img.image;
-                if bleed_flag {
-                    alpha_bleed(&mut rgba);
-                }
-                let bytes = match encode_png(&rgba) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        clear_progress_line();
-                        log!(warn, "Failed to encode {}@{}x: {}", base_name, scale, e);
-                        return None;
+    // `(base_name, scale, bytes, hash, source_hash)` per variant.
+    let tasks: Vec<(String, u8, Vec<u8>, String, String)> =
+        tokio::task::spawn_blocking(move || {
+            dpi_groups_vec
+                .into_par_iter()
+                .filter_map(|(base_name, scale, img)| {
+                    let mut rgba = img.image;
+                    let source_hash = img.source_hash;
+                    if bleed {
+                        alpha_bleed(&mut rgba);
                     }
-                };
-                let bytes = maybe_compress_png(bytes, compress_opts.as_ref());
-                let hash = hash_image(&bytes);
-                Some((base_name, scale, bytes, hash))
-            })
-            .collect()
-    })
-    .await
-    .expect("spawn_blocking panicked");
+                    let bytes = match encode_png(&rgba) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            clear_progress_line();
+                            log!(warn, "Failed to encode {}@{}x: {}", base_name, scale, e);
+                            return None;
+                        }
+                    };
+                    let bytes = maybe_compress_png(bytes, compress_opts.as_ref());
+                    let hash = hash_bytes(&bytes);
+                    Some((base_name, scale, bytes, hash, source_hash))
+                })
+                .collect()
+        })
+        .await
+        .expect("spawn_blocking panicked");
 
     // 2. Group variants by base name so each base aggregates all scales.
     // Moving `base_name` out of the tuple avoids cloning it per variant.
-    let mut by_base: HashMap<String, Vec<(u8, Vec<u8>, String)>> = HashMap::new();
-    for (base_name, scale, bytes, hash) in tasks {
+    /// (scale, encoded bytes, processed hash, source hash) per variant.
+    type Variant = (u8, Vec<u8>, String, String);
+    let mut by_base: HashMap<String, Vec<Variant>> = HashMap::new();
+    for (base_name, scale, bytes, hash, source_hash) in tasks {
         by_base
             .entry(base_name)
             .or_default()
-            .push((scale, bytes, hash));
+            .push((scale, bytes, hash, source_hash));
     }
 
-    let semaphore = Arc::new(Semaphore::new(max_concurrent_uploads));
-    let mut upload_tasks: JoinSet<Result<(String, u8, u64, String)>> = JoinSet::new();
+    let total_variants: usize = by_base.values().map(Vec::len).sum();
 
     // Resolved (scale, id) pairs per base: cache hits and fresh uploads land
     // in the same bucket so each base emits a single codegen entry.
     let mut resolved: HashMap<String, Vec<(u8, u64)>> = HashMap::new();
-    let total_variants: usize = by_base.values().map(Vec::len).sum();
     let mut dispatched = 0usize;
 
+    // DPI uploads resolve to (base, scale, id, hash), which is richer than the
+    // plain dispatcher's (name, id, hash), so they run their own JoinSet.
+    let semaphore = Arc::clone(&ctx.semaphore);
+    let mut upload_tasks: JoinSet<Result<(String, u8, u64, String)>> = JoinSet::new();
+    let dry_run = ctx.dry_run;
+
     for (base_name, tasks) in by_base {
-        for (scale, bytes, hash) in tasks {
+        // v3 parent entry: `source_hash` of the 1x variant (or the first
+        // available), variants land under `dpi` per scale.
+        if !dry_run {
+            let parent_source = tasks
+                .iter()
+                .find(|(s, ..)| *s == 1)
+                .or_else(|| tasks.first())
+                .map(|(.., sh)| sh.clone())
+                .unwrap_or_default();
+            ctx.lockfile.upsert_dpi_parent(
+                ctx.input_name,
+                &base_name,
+                "image/png",
+                &parent_source,
+                true,
+            );
+        }
+
+        for (scale, bytes, hash, _source_hash) in tasks {
             if dry_run {
                 dispatched += 1;
                 progress("Uploading", dispatched, total_variants, &base_name);
@@ -127,7 +140,13 @@ pub async fn process_dpi_groups(
 
             match target {
                 Target::Cloud => {
-                    if let Some(cached) = lockfile.get(input_name, &hash) {
+                    let cached = ctx
+                        .lockfile
+                        .entry(ctx.input_name, &base_name)
+                        .and_then(|e| e.dpi.get(&scale))
+                        .filter(|v| v.hash == hash)
+                        .and_then(|v| v.id);
+                    if let Some(cached) = cached {
                         dispatched += 1;
                         progress("Uploading", dispatched, total_variants, &base_name);
                         resolved
@@ -136,7 +155,7 @@ pub async fn process_dpi_groups(
                             .push((scale, cached));
                         continue;
                     }
-                    let Some(c) = client else {
+                    let Some(c) = &ctx.client else {
                         resolved
                             .entry(base_name.clone())
                             .or_default()
@@ -151,13 +170,13 @@ pub async fn process_dpi_groups(
                     );
                     let base_clone = base_name.clone();
                     let hash_clone = hash;
-                    let creator_clone = creator.clone();
-                    let asset_type_override = asset_type.map(|s| s.to_string());
+                    let creator_clone = ctx.creator.clone();
+                    let asset_type_override = ctx.asset_type_override.clone();
                     let semaphore_clone = semaphore.clone();
                     upload_tasks.spawn(async move {
                         let _permit = semaphore_clone.acquire_owned().await;
                         let id = c_arc
-                            .upload(UploadParams {
+                            .upload(crate::api::upload::UploadParams {
                                 file_name,
                                 display_name: format!("{}@{}x", base_clone, scale),
                                 description: "Uploaded by Tungsten".to_string(),
@@ -175,8 +194,7 @@ pub async fn process_dpi_groups(
                 }
                 Target::Studio => {
                     let rel = format!("{}@{}x.png", base_name, scale);
-                    let uri = match copy_to_studio(studio_sync, studio_expected_files, &rel, &bytes)
-                    {
+                    let uri = match copy_to_studio(ctx, &rel, &bytes) {
                         Ok(u) => u,
                         Err(e) => {
                             clear_progress_line();
@@ -187,14 +205,28 @@ pub async fn process_dpi_groups(
                                 scale,
                                 e
                             );
-                            errors += 1;
+                            ctx.errors += 1;
                             continue;
                         }
                     };
-                    lockfile.set_uri(input_name, hash.clone(), uri);
+                    let fallback_id = ctx
+                        .lockfile
+                        .entry(ctx.input_name, &base_name)
+                        .and_then(|e| e.dpi.get(&scale))
+                        .and_then(|v| v.id)
+                        .unwrap_or(0);
+                    ctx.lockfile.set_dpi_variant(
+                        ctx.input_name,
+                        &base_name,
+                        scale,
+                        crate::core::postsync::lockfile::DpiVariant {
+                            hash,
+                            id: (fallback_id != 0).then_some(fallback_id),
+                            studio_uri: Some(uri),
+                        },
+                    );
                     dispatched += 1;
                     progress("Copying", dispatched, total_variants, &base_name);
-                    let fallback_id = lockfile.get(input_name, &hash).unwrap_or(0);
                     resolved
                         .entry(base_name.clone())
                         .or_default()
@@ -202,7 +234,7 @@ pub async fn process_dpi_groups(
                 }
                 Target::Debug => {
                     let rel = format!("{}@{}x.png", base_name, scale);
-                    if let Err(e) = copy_to_debug(debug_sync, &rel, &bytes) {
+                    if let Err(e) = copy_to_debug(ctx, &rel, &bytes) {
                         clear_progress_line();
                         log!(
                             warn,
@@ -211,12 +243,27 @@ pub async fn process_dpi_groups(
                             scale,
                             e
                         );
-                        errors += 1;
+                        ctx.errors += 1;
                         continue;
                     }
                     dispatched += 1;
                     progress("Copying", dispatched, total_variants, &base_name);
-                    let fallback_id = lockfile.get(input_name, &hash).unwrap_or(0);
+                    let fallback_id = ctx
+                        .lockfile
+                        .entry(ctx.input_name, &base_name)
+                        .and_then(|e| e.dpi.get(&scale))
+                        .and_then(|v| v.id)
+                        .unwrap_or(0);
+                    ctx.lockfile.set_dpi_variant(
+                        ctx.input_name,
+                        &base_name,
+                        scale,
+                        crate::core::postsync::lockfile::DpiVariant {
+                            hash,
+                            id: (fallback_id != 0).then_some(fallback_id),
+                            studio_uri: None,
+                        },
+                    );
                     resolved
                         .entry(base_name.clone())
                         .or_default()
@@ -230,18 +277,27 @@ pub async fn process_dpi_groups(
     while let Some(res) = upload_tasks.join_next().await {
         match res {
             Ok(Ok((base_name, scale, id, hash))) => {
-                lockfile.set(input_name, hash, id);
+                ctx.lockfile.set_dpi_variant(
+                    ctx.input_name,
+                    &base_name,
+                    scale,
+                    crate::core::postsync::lockfile::DpiVariant {
+                        hash,
+                        id: Some(id),
+                        studio_uri: None,
+                    },
+                );
                 resolved.entry(base_name).or_default().push((scale, id));
             }
             Ok(Err(e)) => {
                 clear_progress_line();
                 log!(warn, "{}", e);
-                errors += 1;
+                ctx.errors += 1;
             }
             Err(e) => {
                 clear_progress_line();
                 log!(warn, "DPI upload task panicked: {}", e);
-                errors += 1;
+                ctx.errors += 1;
             }
         }
     }
@@ -253,27 +309,20 @@ pub async fn process_dpi_groups(
         codegen_entries.push(CodegenEntry::dpi_group(base_name, variants));
     }
 
-    errors
+    ctx.errors - errors_start
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::api::sync::debug::DebugSync;
-    use crate::api::sync::roblox::{Creator, UserCreator};
     use crate::core::assets::img::pack;
     use crate::core::postsync::codegen::CodegenKind;
     use image::RgbaImage;
     use tempfile::tempdir;
 
-    fn creator() -> Creator {
-        Creator::User(UserCreator {
-            user_id: "0".to_string(),
-        })
-    }
-
     fn encoded_hash(img: &pack::InputImage) -> String {
-        hash_image(&encode_png(&img.image).unwrap())
+        hash_bytes(&encode_png(&img.image).unwrap())
     }
 
     #[test]
@@ -284,10 +333,12 @@ mod tests {
         let img1 = pack::InputImage {
             name: "search".to_string(),
             image: RgbaImage::new(2, 2),
+            source_hash: "src1".to_string(),
         };
         let img2 = pack::InputImage {
             name: "search@2x".to_string(),
             image: RgbaImage::new(4, 4),
+            source_hash: "src2".to_string(),
         };
         let mut dpi_groups = DpiGroups::new();
         dpi_groups.insert(
@@ -295,33 +346,39 @@ mod tests {
             vec![(1, img1.clone()), (2, img2.clone())],
         );
 
-        // Simulate a previously-uploaded 2x variant: the lockfile has a cache hit.
-        let mut lockfile = Lockfile::default();
-        lockfile.set("icons", encoded_hash(&img2), 64);
+        // Simulate a previously-uploaded 2x variant: the lockfile has a
+        // cache hit keyed by the base name + scale + processed hash.
+        let mut lockfile = crate::core::postsync::lockfile::Lockfile::default();
+        lockfile.upsert_dpi_parent("icons", "search", "image/png", "src1", true);
+        lockfile.set_dpi_variant(
+            "icons",
+            "search",
+            2,
+            crate::core::postsync::lockfile::DpiVariant {
+                hash: encoded_hash(&img2),
+                id: Some(64),
+                studio_uri: None,
+            },
+        );
+        let mut expected = std::collections::HashSet::new();
+        let mut ctx = super::super::dispatch::test_context(
+            "icons",
+            Target::Debug,
+            false,
+            &mut lockfile,
+            &mut expected,
+        );
+        ctx.debug_sync = Some(Arc::new(ds));
 
-        let client = None;
-        let studio_sync = None;
-        let debug_sync = Some(Arc::new(ds));
-        let mut studio_expected_files = None;
         let mut codegen_entries: Vec<CodegenEntry> = Vec::new();
 
         let errors = tokio::runtime::Runtime::new()
             .unwrap()
             .block_on(process_dpi_groups(
-                "icons",
+                &mut ctx,
                 dpi_groups,
                 false,
                 None,
-                Target::Debug,
-                false,
-                &creator(),
-                None,
-                &client,
-                &studio_sync,
-                &debug_sync,
-                &mut lockfile,
-                &mut studio_expected_files,
-                4,
                 &mut codegen_entries,
             ));
 

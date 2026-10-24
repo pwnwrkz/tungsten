@@ -1,13 +1,17 @@
+//! Codegen output: seeds web assets and writes the Luau/`.d.ts` modules.
+
 use crate::core::assets::asset::WebAsset;
 use crate::core::postsync::codegen::CodegenEntry;
 use relative_path::RelativePathBuf;
 
-/// Seeds web assets (pre-existing Roblox assets mapped in config) into codegen entries.
-/// This creates AssetRef::Id entries for assets that don't need uploading.
+use super::dispatch::SyncContext;
+
+/// Seeds web assets into codegen entries.
 pub fn seed_web_assets(
     web_assets: &std::collections::HashMap<RelativePathBuf, WebAsset>,
     base_path: &str,
     strip_extension: bool,
+    strip_whitespace: bool,
     codegen_entries: &mut Vec<CodegenEntry>,
 ) {
     for (rel_path, web_asset) in web_assets {
@@ -21,34 +25,39 @@ pub fn seed_web_assets(
         } else {
             name.to_string()
         };
+        let key = if strip_whitespace {
+            key.chars().filter(|c| !c.is_whitespace()).collect()
+        } else {
+            key
+        };
         codegen_entries.push(CodegenEntry::asset_id(key, web_asset.id));
     }
 }
 
-pub fn write_codegen(
-    codegen_entries: Vec<CodegenEntry>,
-    input_name: &str,
-    output_path: &str,
-    codegen_style: &str,
-    strip_extension: bool,
-    ts_declaration: bool,
-    errors: &mut u32,
-) {
-    use crate::core::postsync::codegen;
-    if let Err(e) = codegen::generate(
+/// Generates (and writes) the Luau module for this input from its codegen
+/// entries, honoring the input's resolved `[codegen]` settings.
+pub fn write_codegen(ctx: &mut SyncContext<'_>, mut codegen_entries: Vec<CodegenEntry>) {
+    let strip_whitespace = ctx.codegen.strip_whitespace;
+    if strip_whitespace {
+        for entry in &mut codegen_entries {
+            entry.name = entry.name.chars().filter(|c| !c.is_whitespace()).collect();
+        }
+    }
+
+    if let Err(e) = crate::core::postsync::codegen::generate(
         codegen_entries,
-        input_name,
-        codegen_style,
-        strip_extension,
-        output_path,
-        ts_declaration,
+        ctx.input_name,
+        &ctx.codegen.style,
+        ctx.codegen.strip_extension,
+        ctx.output_path,
+        ctx.codegen.ts_declaration,
     ) {
         crate::log!(
             warn,
             "Failed to write codegen for \"{}\": {}",
-            input_name,
+            ctx.input_name,
             e
         );
-        *errors += 1;
+        ctx.errors += 1;
     }
 }

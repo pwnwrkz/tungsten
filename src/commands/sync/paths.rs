@@ -1,6 +1,9 @@
+//! Input path collection: globs an input, resolves its base dir, loads its `.tmeta`.
+
 use std::path::{Path, PathBuf};
 
 use crate::core::assets::asset::{self, AssetMeta};
+use crate::log;
 use anyhow::{Context, Result};
 use glob::glob;
 
@@ -22,7 +25,7 @@ pub fn collect_paths(pattern: &str) -> Result<Vec<PathBuf>> {
                 }
             }
             Err(e) => {
-                eprintln!("Warning: skipping unreadable path: {}", e);
+                log!(warn, "skipping unreadable path: {}", e);
                 None
             }
         })

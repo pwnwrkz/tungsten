@@ -1,5 +1,9 @@
+//! Luau (and optional `.d.ts`) codegen from sync results: flat/nested styles, DPI entries.
+
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
+
+use crate::log;
 
 // Types
 
@@ -117,18 +121,35 @@ pub fn generate(
             .with_context(|| format!("Failed to create directory for \"{}\"", output_path))?;
     }
 
-    std::fs::write(output_path, luau)
-        .with_context(|| format!("Failed to write codegen to \"{}\"", output_path))?;
+    // Only write if the content actually changed — avoids unnecessary downstream
+    // rebuilds in tools like Rojo when nothing changed.
+    if write_if_changed(output_path, &luau)? {
+        log!(debug, "Codegen written: {}", output_path);
+    }
 
     if ts_declaration {
         let dts_path = dts_path_for(output_path);
         let dts = generate_dts(&entries, table_name, style, strip_extension);
-        std::fs::write(&dts_path, dts).with_context(|| {
-            format!("Failed to write TypeScript definition to \"{}\"", dts_path)
-        })?;
+        if write_if_changed(&dts_path, &dts)? {
+            log!(debug, "TypeScript definition written: {}", dts_path);
+        }
     }
 
     Ok(())
+}
+
+/// Write `content` to `path` only if the file doesn't exist or its content
+/// differs from `content`. Returns `true` if a write occurred.
+fn write_if_changed(path: &str, content: &str) -> Result<bool> {
+    let should_write = match std::fs::read_to_string(path) {
+        Ok(existing) => existing != content,
+        Err(_) => true,
+    };
+    if should_write {
+        std::fs::write(path, content)
+            .with_context(|| format!("Failed to write to \"{}\"", path))?;
+    }
+    Ok(should_write)
 }
 
 /// `src/assets.luau` -> `src/assets.d.ts`
@@ -223,10 +244,11 @@ fn build_tree<'a>(
     let mut root: BTreeMap<String, TreeNode<'a>> = BTreeMap::new();
     for entry in entries {
         let key = entry_key(entry, strip_extension);
-        let parts: Vec<&str> = key.split('/').collect();
+        let mut parts = key.split('/').peekable();
         let mut current = &mut root;
-        for (i, &part) in parts.iter().enumerate() {
-            if i == parts.len() - 1 {
+        while let Some(part) = parts.next() {
+            let is_last = parts.peek().is_none();
+            if is_last {
                 current.insert(part.to_string(), TreeNode::Leaf(entry));
             } else {
                 current = match current
@@ -536,16 +558,11 @@ mod tests {
 
     #[test]
     fn test_luau_dpi_group_flat() {
-        generate(
-            dpi_entries(),
-            "Assets",
-            "flat",
-            true,
-            "test_dpi_flat.luau",
-            false,
-        )
-        .unwrap();
-        let c = std::fs::read_to_string("test_dpi_flat.luau").unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("test_dpi_flat.luau");
+        let path_str = path.to_str().unwrap();
+        generate(dpi_entries(), "Assets", "flat", true, path_str, false).unwrap();
+        let c = std::fs::read_to_string(&path).unwrap();
         assert!(
             c.contains("function(dpiScale)"),
             "should emit dpiScale function"
@@ -557,25 +574,19 @@ mod tests {
         assert!(c.contains("rbxassetid://200"), "2x id");
         assert!(c.contains("rbxassetid://100"), "1x id");
         assert!(c.contains("rbxassetid://999"), "other asset untouched");
-        std::fs::remove_file("test_dpi_flat.luau").unwrap();
     }
 
     #[test]
     fn test_luau_dpi_group_nested() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("test_dpi_nested.luau");
+        let path_str = path.to_str().unwrap();
         let entries = vec![CodegenEntry::dpi_group(
             "ui/hello.png".into(),
             vec![(1, 10), (2, 20)],
         )];
-        generate(
-            entries,
-            "Assets",
-            "nested",
-            true,
-            "test_dpi_nested.luau",
-            false,
-        )
-        .unwrap();
-        let c = std::fs::read_to_string("test_dpi_nested.luau").unwrap();
+        generate(entries, "Assets", "nested", true, path_str, false).unwrap();
+        let c = std::fs::read_to_string(&path).unwrap();
         assert!(c.contains("function(dpiScale)"));
         assert!(c.contains("rbxassetid://20"));
         assert!(c.contains("rbxassetid://10"));
@@ -589,67 +600,48 @@ mod tests {
             !c.contains("rbxassetid://10\"\n\t\t\tend\n\t\t},"),
             "DPI function must not close with `}},`:\n{c}"
         );
-        std::fs::remove_file("test_dpi_nested.luau").unwrap();
     }
 
     // Luau: unchanged behaviour
 
     #[test]
     fn test_luau_flat_assets() {
-        generate(
-            asset_entries(),
-            "Sounds",
-            "flat",
-            true,
-            "test_sounds.luau",
-            false,
-        )
-        .unwrap();
-        let c = std::fs::read_to_string("test_sounds.luau").unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("test_sounds.luau");
+        let path_str = path.to_str().unwrap();
+        generate(asset_entries(), "Sounds", "flat", true, path_str, false).unwrap();
+        let c = std::fs::read_to_string(&path).unwrap();
         assert!(c.contains("\"rbxassetid://999\""));
         assert!(c.contains("\"rbxassetid://888\""));
         assert!(!c.contains("ImageRectOffset"));
-        std::fs::remove_file("test_sounds.luau").unwrap();
     }
 
     #[test]
     fn test_luau_sprites() {
-        generate(
-            sprite_entries(),
-            "Icons",
-            "nested",
-            true,
-            "test_sprites.luau",
-            false,
-        )
-        .unwrap();
-        let c = std::fs::read_to_string("test_sprites.luau").unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("test_sprites.luau");
+        let path_str = path.to_str().unwrap();
+        generate(sprite_entries(), "Icons", "nested", true, path_str, false).unwrap();
+        let c = std::fs::read_to_string(&path).unwrap();
         assert!(c.contains("Image = \"rbxassetid://12345678\""));
         assert!(c.contains("ImageRectOffset"));
-        std::fs::remove_file("test_sprites.luau").unwrap();
     }
 
     // TypeScript definition: DPI group
 
     #[test]
     fn test_dts_dpi_group_type() {
-        generate(
-            dpi_entries(),
-            "Assets",
-            "flat",
-            true,
-            "test_dts_dpi.luau",
-            true,
-        )
-        .unwrap();
-        let c = std::fs::read_to_string("test_dts_dpi.d.ts").unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("test_dts_dpi.luau");
+        let path_str = path.to_str().unwrap();
+        generate(dpi_entries(), "Assets", "flat", true, path_str, true).unwrap();
+        let dts_path = tmp.path().join("test_dts_dpi.d.ts");
+        let c = std::fs::read_to_string(&dts_path).unwrap();
         assert!(
             c.contains("(dpiScale: number) => string"),
             "DPI group should type as function"
         );
         assert!(!c.contains("rbxassetid"), "no asset IDs in .d.ts");
-        std::fs::remove_file("test_dts_dpi.luau").unwrap();
-        std::fs::remove_file("test_dts_dpi.d.ts").unwrap();
     }
 
     // dts_path_for

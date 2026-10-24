@@ -2,6 +2,7 @@
 // It is not intended for manual editing.
 
 declare const images: {
+	old_circle_sprite: string
 	placeholder: {
 		check: string
 		x: string

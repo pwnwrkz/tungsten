@@ -2,25 +2,26 @@
 -- It is not intended for manual editing.
 
 local images = {
+	old_circle_sprite = "rbxassetid://0",
 	placeholder = {
-		check = "rbxassetid://90715183443116",
-		x = "rbxassetid://105188188009413",
+		check = "rbxassetid://0",
+		x = "rbxassetid://0",
 	},
 	searchbar = {
 		["chevron-down"] = function(dpiScale)
 			if dpiScale >= 2 then
-				return "rbxassetid://116973626947273"
+				return "rbxassetid://0"
 			else
-				return "rbxassetid://116973626947273"
+				return "rbxassetid://0"
 			end
 		end,
 		search = function(dpiScale)
 			if dpiScale >= 3 then
-				return "rbxassetid://114925583920819"
+				return "rbxassetid://0"
 			elseif dpiScale >= 2 then
-				return "rbxassetid://114925583920819"
+				return "rbxassetid://0"
 			else
-				return "rbxassetid://114925583920819"
+				return "rbxassetid://0"
 			end
 		end,
 	},

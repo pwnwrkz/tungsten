@@ -2,8 +2,6 @@ use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-#[allow(unused_imports)]
-use tempfile::tempdir;
 
 /// Syncs assets into a local `.tungsten_debug/` folder mirroring the original
 /// relative path structure. Useful for inspecting exactly what Tungsten would
@@ -83,7 +81,7 @@ mod tests {
 
     #[test]
     fn test_copy_asset_creates_file() {
-        let dir = tempdir().unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let sync = DebugSync {
             sync_path: dir.path().to_path_buf(),
             created_dirs: Mutex::new(HashSet::new()),

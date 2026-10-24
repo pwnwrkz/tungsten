@@ -1,3 +1,5 @@
+//! Interactive terminal prompts for `tungsten init`.
+
 use crate::log;
 use anyhow::Result;
 use crossterm::{
@@ -141,7 +143,7 @@ pub fn select_folders_with_types(
     );
     match run_folder_selector(prompt, &mut items) {
         Ok(()) => {
-            log!(info, "Folder selector completed successfully");
+            log!(info, "Folder selector done");
         }
         Err(e) => {
             log!(

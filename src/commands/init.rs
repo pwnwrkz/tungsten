@@ -1,3 +1,5 @@
+//! `tungsten init` — interactive first-run setup (creator, inputs, target).
+
 use crate::log;
 use crate::utils::interactive::{self, DiscoveredFolder, FolderSelection};
 use anyhow::Result;

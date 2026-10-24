@@ -1,5 +1,8 @@
+//! `tungsten watch` — debounced filesystem watcher that re-runs sync on change.
+
 use anyhow::{Context, Result};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -65,6 +68,18 @@ pub async fn run(
         watch_dirs.len()
     );
 
+    // Ignore our own codegen output files so our writes don't trigger re-syncs.
+    let output_files: HashSet<String> = config
+        .inputs
+        .values()
+        .flat_map(|input| {
+            let out = input.output_path.clone();
+            let dts = crate::core::postsync::codegen::dts_path_for(&out);
+            [out, dts]
+        })
+        .map(|p| p.replace('\\', "/"))
+        .collect();
+
     // Initial sync on startup.
     do_sync(&api_key, target, &config, &is_syncing).await;
 
@@ -83,7 +98,7 @@ pub async fn run(
             event = rx.recv() => {
                 match event {
                     Some(Ok(event)) => {
-                        if is_relevant_event(&event) {
+                        if is_relevant_event(&event, &output_files) {
                             log!(debug, "Change detected: {:?}", event.kind);
                             last_event = Some(Instant::now());
                             pending_change = true;
@@ -101,10 +116,16 @@ pub async fn run(
                 pending_change = false;
                 last_event = None;
                 log!(section, "RE-SYNCING");
-                let fresh_config = match config::load("tungsten.toml") {
-                    Ok(c) => c,
-                    Err(e) => {
+                let fresh_config = match tokio::task::spawn_blocking(|| config::load("tungsten.toml"))
+                    .await
+                {
+                    Ok(Ok(c)) => c,
+                    Ok(Err(e)) => {
                         log!(warn, "Failed to reload tungsten.toml: {}", e);
+                        continue;
+                    }
+                    Err(e) => {
+                        log!(warn, "Config reload panicked: {}", e);
                         continue;
                     }
                 };
@@ -129,9 +150,31 @@ async fn do_sync(
     is_syncing.store(false, Ordering::Relaxed);
 }
 
-fn is_relevant_event(event: &Event) -> bool {
-    matches!(
-        event.kind,
-        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
-    )
+fn is_relevant_event(event: &Event, output_files: &HashSet<String>) -> bool {
+    match event.kind {
+        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => {
+            // Ignore our own output files so watch mode doesn't re-sync forever.
+            // Tungsten writes `tungsten.lock` and codegen output files after
+            // every sync; without this filter those writes trigger new events -> loop.
+            // Only the configured output paths are filtered, user `.luau` files
+            // in watched dirs still trigger a sync.
+            if let Some(path) = event.paths.first() {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if name == "tungsten.lock" || name == "tungsten.lock.toml" {
+                    return false;
+                }
+                if let Some(rel) = path.to_str().map(|p| p.replace('\\', "/"))
+                    && output_files.contains(&rel)
+                {
+                    return false;
+                }
+                // Ignore the debug output folder entirely.
+                if path.starts_with(".tungsten_debug") {
+                    return false;
+                }
+            }
+            true
+        }
+        _ => false,
+    }
 }
