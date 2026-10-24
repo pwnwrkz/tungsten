@@ -67,7 +67,7 @@ If a significant portion of your contribution was AI-assisted, note it briefly i
 AI assistance: Used Claude to help scaffold the initial implementation of X.
 ```
 
-This isn't about policing tools, it's about transparency and helping reviewers give better feedback.
+This helps reviewers give better feedback.
 
 ---
 
