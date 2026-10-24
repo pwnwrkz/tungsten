@@ -1,0 +1,37 @@
+name: Documentation request
+description: Report missing, unclear, or incorrect documentation.
+title: "[DOCS]"
+labels: [documentation]
+assignees: [notmagniill]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form to report documentation that is missing, unclear, or incorrect.
+
+  - type: textarea
+    id: documentation-issue
+    attributes:
+      label: What is missing or unclear?
+      description: Describe the documentation gap or issue.
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: Documentation location
+      description: Link to the page or name the section, if known.
+      placeholder: https://...
+
+  - type: textarea
+    id: suggested-change
+    attributes:
+      label: Suggested change
+      description: What information or clarification would help?
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Include any other relevant context.
