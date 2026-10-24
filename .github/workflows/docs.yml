@@ -1,3 +1,6 @@
+# Deploy documentation to GitHub Pages
+# Taken from https://docs.astro.build/en/guides/deploy/github/
+
 name: Deploy to GitHub Pages
 
 on:
