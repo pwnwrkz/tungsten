@@ -20,6 +20,7 @@ target/
 /target
 
 # Tungsten specific ignores
+tests/.tungsten_debug/
 /tungsten.toml
 /tungsten.lock
 /tungsten.lock.toml
