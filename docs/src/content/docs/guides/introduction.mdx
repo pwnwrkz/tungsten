@@ -1,0 +1,69 @@
+---
+title: Introduction
+description: Learn what Tungsten is, why it was created, and what app to use instead of it.
+---
+
+import { Icon } from "astro-icon/components";
+
+Welcome to the Tungsten user-guide! In this page we will be going over what Tungsten is, and why you should use it.
+
+## What is Tungsten?
+
+Tungsten is an open source command-line tool for managing, packing, and syncing Roblox assets. This page covers what it does and how it compares with the tools it replaces.
+
+Created during the development of [LucideRoblox](https://github.com/notmagniill/LucideRoblox), Tungsten started with the gaps in the existing Roblox tooling. Tarmac and Asphalt covered the basics, but both had limitations or aging infrastructure behind them.
+
+Tungsten keeps what those tools got right and targets Roblox's Open Cloud API directly.
+
+## What does Tungsten offer?
+
+Tungsten offers a lot of capabilities! Such as:
+
+- **Multi-Asset Syncing:** Push images, audio, models, and animations to the Roblox Open Cloud API, Studio, or a local workspace.
+- **Automatic Packing:** Combine images into spritesheets as part of the sync.
+- **Code Generation:** Generate type-safe Luau code and TypeScript declaration files for your assets.
+- **Smart Initialization:** Auto-detects project folders and generates a valid configuration structure.
+- **Watch Mode:** Syncs automatically when files change. Similar to `rojo serve`.
+- **Native SVG Rasterization:** Converts SVG to PNG without external tools.
+- **Built-in Image Compression:** Uses `libcaesium` to optimize JPEG/PNG quality and strip metadata locally.
+- **High DPI / Retina Support:** Detects `@2x`, `@3x` suffixes and generates Luau DPI-switching functions.
+- **Metadata Support:** Define custom names and descriptions via `.tmeta` files.
+- **External Asset Mapping:** Link to assets that already exist on Roblox; they're included in generated code without re-uploading.
+- **Flexible Targets:** Switch between User and Group-owned assets.
+- **[Vinegar](https://vinegarhq.org/Vinegar/Installation) Support:** Supported out of the box, no configuration needed!
+
+:::note[Info]
+Want a new feature added? You can either create features yourself by creating pull requests in the official [GitHub repository](https://github.com/pwnwrkz/tungsten/pulls), or request it via the [issue tracker](https://github.com/pwnwrkz/tungsten/issues)!
+:::
+
+## Should I choose Tungsten over Asphalt ~~or Tarmac~~?
+
+It really depends on what you or your team needs, here's a table that compares main features between the three tools:
+
+| Feature             | Tungsten                                                       | Asphalt                                                               | Tarmac                                    |
+| ------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------- |
+| **Status**          | <Icon name="check"></Icon> Active                              | <Icon name="check"></Icon> Active                                     | <Icon name="close"></Icon> Deprecated     |
+| **API**             | <Icon name="cloud"></Icon> Open Cloud                          | <Icon name="cloud"></Icon> Open Cloud                                 | <Icon name="alert"></Icon> Legacy API |
+| **Packing**         | <Icon name="check"></Icon> Supported                           | <Icon name="close"></Icon> No                                         | <Icon name="alert"></Icon> Partial [^1]   |
+| **Codegen**         | <Icon name="check"></Icon> Supported                           | <Icon name="check"></Icon> Supported                                  | <Icon name="alert"></Icon> Partial [^2]   |
+| **Asset Support**   | <Icon name="archive"></Icon> Images, Audio, Models, Animations | <Icon name="archive"></Icon> Images, Audio, Video, Models, Animations | <Icon name="image"></Icon> Images Only    |
+| **External Assets** | <Icon name="check"></Icon> Supported                           | <Icon name="check"></Icon> Supported                                  | <Icon name="close"></Icon> No             |
+| **DPI support**     | <Icon name="check"></Icon> Supported                           | <Icon name="close"></Icon> No                                         | <Icon name="check"></Icon> Supported      |
+
+### If you still can't decide, or just needed a TL;DR
+
+- **Choose Tungsten** if you need a tool that offers everything from both tools, and has extra features like compression and metadata.
+- **Choose Asphalt** if your project really needs **Video** asset uploads; Tungsten has yet to support it.
+- **DON'T USE TARMAC.** It hasn't been updated since 2025 and fails to sync due to it using Legacy APIs.
+
+That's all for recommendations now!
+
+## Notes
+
+We hope you understood what is Tungsten and what it offers, hopefully you have also made up your choice on what tool you will be using!
+
+Next chapter, we will learn how to install Tungsten!
+
+[^1]: Tarmac requires images to be in strict **RGBA** color format; other color formats will cause the tool to panic and fail.
+
+[^2]: Tarmac doesn't have the capability to generate TypeScript declarations.

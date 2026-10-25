@@ -2,6 +2,9 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import starlightThemeNova from "starlight-theme-nova";
+// import starlightVersions from "starlight-versions";
+
+import icon from "astro-icon";
 
 // https://astro.build/config
 export default defineConfig({
@@ -9,13 +12,19 @@ export default defineConfig({
   base: "/tungsten",
   integrations: [
     starlight({
-      plugins: [starlightThemeNova()],
+      plugins: [
+        starlightThemeNova()
+      ],
+      /*components: {
+        Search: "starlight-versions/components/VersionSearch.astro",
+        ThemeSelect: "./src/components/VersionThemeSelect.astro",
+        },*/
       title: "Tungsten",
       favicon: "/favicon.svg",
       customCss: ["./src/styles/custom.css"],
       logo: {
-        light: "./src/assets/TungstenBannerDark.png",
-        dark: "./src/assets/TungstenBannerLight.png",
+        light: "./src/assets/TungstenBannerDark.svg",
+        dark: "./src/assets/TungstenBannerLight.svg",
         replacesTitle: true,
       },
       social: [
@@ -27,18 +36,15 @@ export default defineConfig({
       ],
       sidebar: [
         {
-          label: "Getting Started",
+          label: "Guides",
           items: [
-            { label: "Introduction", slug: "getting-started/introduction" },
-            { label: "Installation", slug: "getting-started/installation" },
-          ],
-        },
-        {
-          label: "Tutorials",
-          items: [
-            { label: "Your First Sync", slug: "guides/first-sync" },
-            { label: "Mastering Asset Packing", slug: "guides/packing" },
-            { label: "Advanced Workflows", slug: "guides/advanced" },
+            { label: "Introduction", slug: "guides/introduction" },
+            { label: "Installation", slug: "guides/installation" },
+            { label: "Initializing Your Project", slug: "guides/init" },
+            { label: "Actually Syncing", slug: "guides/sync" },
+            { label: "Packing Spritesheets", slug: "guides/pack" },
+            { label: "Stuff about images and audio", slug: "guides/extra" },
+            { label: "Metadata Files", slug: "guides/meta" },
           ],
         },
         {
@@ -51,5 +57,6 @@ export default defineConfig({
         },
       ],
     }),
+    icon(),
   ],
 });

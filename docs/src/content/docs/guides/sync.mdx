@@ -1,0 +1,148 @@
+---
+title: Actually Syncing
+description: Learn how to sync your assets with Tungsten, and how to use your Open Cloud API key.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+Last chapter was about initializing our project, and this chapter is about finally syncing! **BUUUUT** we still need to do a bit more work before we actually can do syncing.
+
+## Open Cloud API Key
+
+Tungsten uses the Open Cloud API, and when it wants to access it with you or your group's identity it needs an **API key**! So you must input an API key with either three of these options:
+
+### A: The Environment Variable
+
+You can set your API key as an environment variable globally on your system or your terminal session, simply run:
+
+```bash
+export TUNGSTEN_GLOBAL_APIKEY="your-api-key-here"
+```
+
+This option is recommended for CI/CD usage, especially for teams!
+
+### B: Local `.env` File
+
+You can add a new entry in your `.env` file for Tungsten to use your API key:
+
+```txt
+TUNGSTEN_API_KEY=your-api-key-here
+```
+
+This option is recommended for solo developers if you only have one machine!
+
+:::danger[Caution]
+Remember to **NEVER EVER** commit your local `.env` file! Otherwise, your API key gets leaked and other people can use it to create and modify any asset they want.
+:::
+
+### C: The CLI Flag
+
+If you want to use a key only for a specific run, pass it directly in your command:
+
+```bash
+tungsten sync cloud --api-key your-api-key-here
+```
+
+This option is recommended if you just want to test out if an asset can upload!
+
+### Priority
+
+Tungsten follows a priority system when choosing which API keys to use when syncing.
+
+The priority of these options are displayed from **most prioritized to least prioritized**:
+
+<Steps>
+
+1. The CLI Flag
+2. Local `.env` File
+3. The Environment Variable
+
+</Steps>
+
+If an option doesn't contain any API key, it will go on to the next option, and the next one. If no keys were found in any of these options, Tungsten will error, telling you to provide an API key.
+
+Now since that's settled, we can get into syncing!
+
+## Thinking about testing?
+
+Sometimes you may feel paranoid something isn't correct, and by the time you start uploading your assets it may fail on you in the middle of uploading (rest assured, this won't happen... hopefully...) or something destructive.
+
+Well, you're in luck, because Tungsten has a test command! Basically, it lets you test if your API key works by uploading smoke tests. You will need to supply it the `--api-key` flag though, for certain safety reasons (or maybe I'm just lazy to add the other API key methods to the test command) and no destructive wiping is condone.
+
+```bash
+tungsten test [flags]
+```
+
+The only flag would be the `--api-key` flag, as mentioned.
+
+## Alright Syncing Here We Go
+
+To sync your assets and generate Luau code (and optionally TypeScript declarations together) simply run the following command:
+
+```bash
+tungsten sync <target> [flags]
+```
+
+Looking at this command, you may not know what targets and flags are there, here's some information about them:
+
+### Targets
+
+There are a total of 3 targets in Tungsten, `cloud`, `studio` and `debug`.
+
+`cloud` means it will upload to Roblox, giving you `rbxassetid`'s.
+
+`studio` means it will upload to your Roblox Studio installation path, giving you `rbxasset` URIs.
+
+And `debug` means it will create a folder named `.tungsten_debug` with all of your assets in their processed state, your codegen will return `rbxassetid://0` if there weren't previous syncs.
+
+### Flags
+
+Two flags can be provided when running sync, `--api-key` and `--dry-run`.
+
+As explained just now, you can supply the `--api-key` flag to either override the other 2 options in priority, or you don't have an API key and this is your solution if you like to do it the hard way.
+
+The `--dry-run` key acts a bit differently though. If you want to use this flag, you cannot supply a target, or else it will error. `--dry-run` is similar to how you would do `cargo publish --dry-run`, it will show you what will happen when you run an actual sync, but it won't upload anything nor store anything, it's only handled in memory.
+
+### Using your generated code
+
+Now after you finished syncing, what now? Well Tungsten generates code for you to reference your assets, so you can use it like this:
+
+```luau
+local Assets = game.ReplicatedStorage.Assets
+
+-- Require the module Tungsten generated
+local Images = require(Assets.Images)
+
+local grabberButton = script.Parent
+grabberButton.Image = Images.button_grabber_mobile
+```
+
+## Some advanced things
+
+Optionally, there are some advanced features Tungsten offers. Here are some of them:
+
+### Maximum Concurrent Uploads
+
+For faster syncing, you can pass in a root-level field in `tungsten.toml` named `max_concurrent_uploads`. This controls, how many uploads Tungsten can have at the same time.
+
+```toml
+max_concurrent_uploads = 20 # Default: 10
+```
+
+### Watch Mode
+
+Watch Mode is basically syncing, but it **watches** your files if they change and automatically sync them. And it blocks your terminal from input, better prepare a second one, or a sixth one if you're running [five Claude Code sessions in your terminal](https://x.com/bcherny/status/2007179833990885678)!
+
+To run watch mode, just run the command:
+
+```bash
+tungsten watch <target> [flags]
+```
+
+The targets and flags are the same as sync.
+
+## Notes
+
+So what did we learn here? Well, we learnt that we must have an API key that Tungsten can access, and we also learnt about testing and syncing, watching and maximum concurrent uploads (if you read the advanced section).
+
+Great, you now know how to sync with Tungsten!

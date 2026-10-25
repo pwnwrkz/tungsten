@@ -1,53 +1,44 @@
 ---
 title: Meta Files
-description: A reference on how meta files work with Tungsten.
+description: A reference for metadata sidecar files (`.tmeta`) and their supported fields.
 ---
 
 import { FileTree } from "@astrojs/starlight/components";
 
-Meta files (`.tmeta`) allow you to customize the metadata of your assets, such as their names and descriptions on the Roblox website. They also control per-asset settings like SVG rasterization scale.
+Meta files are TOML sidecar files that configure an asset or directory without changing `tungsten.toml`. They can override asset metadata sent to Roblox and set SVG rasterization scale.
 
-## File Naming Conventions
+## File Naming
 
-Tungsten looks for meta files using this priority:
+Tungsten checks for metadata files in this order:
 
-1. **For files**: First tries `name.format.tmeta` (e.g., `logo.png.tmeta`), then falls back to `name.tmeta` (e.g., `logo.tmeta`)
-2. **For directories**: Uses `name.tmeta` (e.g., `icons.tmeta` in the same parent directory)
+1. **Asset-specific sidecar**: `<name>.<extension>.tmeta` (for example, `logo.png.tmeta`).
+2. **Asset fallback sidecar**: `<name>.tmeta` (for example, `logo.tmeta`).
+3. **Directory sidecar**: `<directory>.tmeta`, applied to files in that directory and its nested directories.
+4. **Configuration defaults**: Values configured in `tungsten.toml`.
 
-## Fields
+For example, `assets/logo.png.tmeta` is the asset-specific sidecar for `assets/logo.png`.
 
-| Field         | Type      | Description                                                            |
-| ------------- | --------- | ---------------------------------------------------------------------- |
-| `name`        | `string`  | The display name of the asset or spritesheet on Roblox.                |
-| `description` | `string`  | The description text that appears on the asset's Roblox page.          |
-| `svg_scale`   | `number`  | Multiplier for SVG rasterization (default: 1.0, min: 0.01).            |
+## Supported Fields
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `name` | `string` | Overrides the display name sent to Roblox. For packed assets, a directory's name can be used as the generated spritesheet prefix. |
+| `description` | `string` | Overrides the description sent to Roblox. |
+| `type` | `string` | Overrides the asset type sent to Roblox. The value `"auto"` derives the type from the file kind. For `.rbxm` and `.rbxmx` files, `"animation"` or `"model"` pins the type without parsing the DOM. This takes precedence over the input-level `type`. |
+| `svg_scale` | `number` | Overrides the SVG rasterization scale for this asset or directory. The default is `1.0`; the minimum is `0.01`. |
 
 ## Examples
 
-### Per-Asset Metadata
+### Asset Sidecar
 
-<FileTree>
-
-- assets/
-  - logo.png
-  - **logo.png.tmeta**
-
-</FileTree>
-
-```toml title="logo.png.tmeta"
+```toml title="assets/logo.png.tmeta"
 name = "Official Project Logo"
 description = "The high-resolution logo used for the main menu."
 ```
 
-### Per-Asset SVG Scale Override
+### Directory Sidecar
 
-```toml title="assets/icons/icon.svg.tmeta"
-svg_scale = 3.0  # Rasterize this specific icon at 3x
-```
-
-### Directory-Level Metadata (Spritesheet Naming)
-
-When using `packable = true`, use a folder-level meta file to give the generated spritesheet a custom prefix.
+Place a sidecar alongside the directory it configures:
 
 <FileTree>
 
@@ -55,38 +46,29 @@ When using `packable = true`, use a folder-level meta file to give the generated
   - icons/
     - shop.png
     - settings.png
-    - play.png
   - **icons.tmeta**
 
 </FileTree>
 
-```toml title="icons.tmeta"
+```toml title="assets/icons.tmeta"
 name = "UIIcons"
 description = "Icons for the user interface."
 ```
 
-Generated spritesheets will be named `UIIcons_001`, `UIIcons_002`, etc.
+When the input uses `packable = true`, generated spritesheets use the directory name as a prefix, such as `UIIcons_001` and `UIIcons_002`.
 
-### Directory-Level SVG Scale Cascade
+### SVG Scale
+
+Set `svg_scale` on a directory to apply it to SVGs in that directory and nested directories. An asset-specific sidecar can override the directory value:
 
 ```toml title="assets/icons.tmeta"
-svg_scale = 2.0  # All SVGs in icons/ rasterize at 2x unless overridden
+svg_scale = 2.0
 ```
-
-Child files can override:
 
 ```toml title="assets/icons/special.svg.tmeta"
-svg_scale = 4.0  # This specific SVG uses 4x
+svg_scale = 4.0
 ```
 
-## Field Reference
-
-| Field         | Type      | Description                                                   |
-| ------------- | --------- | ------------------------------------------------------------- |
-| `name`        | `string`  | The display name of the asset or spritesheet on Roblox.       |
-| `description` | `string`  | The description text that appears on the asset's Roblox page. |
-| `svg_scale`   | `number`  | Multiplier for SVG rasterization (default: 1.0, min: 0.01).   |
-
 :::tip
-Custom names are especially useful for keeping your Create dashboard organized, making it much easier to find specific spritesheets or high-res backgrounds later.
+Use custom names to keep assets and generated spritesheets easier to find in the Roblox Create dashboard.
 :::

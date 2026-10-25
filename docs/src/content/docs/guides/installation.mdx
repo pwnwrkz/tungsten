@@ -1,0 +1,79 @@
+---
+title: Installation
+description: Learn how to install Tungsten on your system.
+---
+
+import IconTabs from "../../../components/IconTabs.astro";
+import IconTabItem from "../../../components/IconTabItem.astro";
+
+In this chapter, we will go through how to install Tungsten!
+
+Installing Tungsten is literally as easy as pressing a button, just open up your terminal and type in the command for which toolchain you want to install in!
+
+Officially supported package managers are listed down here, with their installation command:
+
+<IconTabs>
+    <IconTabItem label="Rokit" icon="pkg/rokit">
+
+      ```bash
+      rokit add pwnwrkz/tungsten
+      ```
+
+    </IconTabItem>
+    <IconTabItem label="Aftman" icon="pkg/aftman">
+
+      ```bash
+      aftman add pwnwrkz/tungsten
+      ```
+
+    </IconTabItem>
+    <IconTabItem label="Mise" icon="pkg/mise">
+
+      ```bash
+      mise use github:pwnwrkz/tungsten
+      ```
+
+    </IconTabItem>
+    <IconTabItem label="WinGet" icon="pkg/winget">
+
+      ```powershell
+      winget install tungsten
+      ```
+
+      :::caution
+      Only versions starting from `v3.1.1` are available on WinGet. Previous versions do not support this installation method.
+      :::
+
+    </IconTabItem>
+    <IconTabItem label="Cargo" icon="pkg/cargo">
+
+      ```bash
+      cargo install tungsten-cli
+      ```
+
+      :::caution[Naming Note]
+      When installing Tungsten with Cargo, the package is published as `tungsten-cli` on [crates.io](https://crates.io/crates/tungsten-cli) to avoid conflicts with an old game engine. Once installed, the CLI command is simply **`tungsten`**.
+      :::
+
+    </IconTabItem>
+</IconTabs>
+
+:::tip
+On a team project, use a **toolchain manager** (like Rokit or Aftman) so everyone runs the same Tungsten version. That avoids "it works on my machine" problems.
+:::
+
+Once that's done, you can verify if Tungsten was correctly installed by checking it's version.
+
+```bash
+tungsten --version
+```
+
+After running the command, it should print something like this:
+
+```
+Tungsten v4.0.0-rc.1
+```
+
+The latest **stable** version of Tungsten is `v3.1.1`, while the latest **unstable** version of Tungsten is `v4.0.0-rc.1`.
+
+We now have Tungsten ready to sync our assets! Next chapter we will start actually learning how syncing works.

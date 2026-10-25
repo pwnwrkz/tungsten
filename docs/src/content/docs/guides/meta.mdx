@@ -1,0 +1,82 @@
+---
+title: Metadata Files
+description: Learn how metadata files work in Tungsten, and how to use them to customize how your assets sync.
+---
+
+import { FileTree } from "@astrojs/starlight/components";
+
+One handy feature introduced in Tungsten 1.0.0 was metadata files, which use the `.tmeta` format. These files let you customize your assets without changing their filenames, and can control things like their names and descriptions on Roblox.
+
+## Using Metadata
+
+### File Metadata
+
+There are two ways to use metadata files: for an individual asset, or for a directory. Let's start with an individual asset.
+
+<FileTree>
+
+- assets/
+  - logo.png
+  - **logo.png.tmeta**
+
+</FileTree>
+
+The metadata file sits next to the asset. Add fields to it in TOML format:
+
+```toml title="logo.png.tmeta"
+name = "Official Project Logo"
+description = "The high-resolution logo used for the main menu."
+```
+
+Tungsten first looks for a file named after the full asset, like `logo.png.tmeta`. If that isn't found, it looks for `logo.tmeta` instead.
+
+### Directory Metadata
+
+You can also place a `.tmeta` file next to a directory to apply metadata to the directory's contents. This is useful when packing images into a spritesheet: the directory's `name` becomes the generated spritesheet's prefix.
+
+<FileTree>
+
+- assets/
+  - icons/
+    - shop.png
+    - settings.png
+    - play.png
+  - **icons.tmeta**
+
+</FileTree>
+
+```toml title="icons.tmeta"
+name = "UIIcons"
+description = "Icons for the user interface."
+```
+
+The generated spritesheets will be named `UIIcons_001`, `UIIcons_002`, and so on. This applies when the input is configured with `packable = true`.
+
+### Controlling SVG Scale
+
+You can use the `svg_scale` field to change the rasterization scale for SVG files. Set it in a file's metadata to override the scale for that SVG:
+
+```toml title="assets/icons/icon.svg.tmeta"
+svg_scale = 3.0 # Rasterize this icon at 3x
+```
+
+Or set it in a directory metadata file to apply it to SVGs in that directory. A child file can provide its own `svg_scale` and override the directory's value:
+
+```toml title="assets/icons.tmeta"
+svg_scale = 2.0 # SVGs in icons/ rasterize at 2x by default
+```
+
+```toml title="assets/icons/special.svg.tmeta"
+svg_scale = 4.0 # This SVG uses 4x
+```
+
+## Available Fields
+
+| Field | Type | Description |
+| ----- | ---- | ----------- |
+| `name` | `string` | The asset or spritesheet's display name on Roblox. |
+| `description` | `string` | The description shown on the asset's Roblox page. |
+| `type` | `string` | Overrides the asset type sent to Roblox. |
+| `svg_scale` | `number` | SVG rasterization multiplier (default: `1.0`, minimum: `0.01`). |
+
+Custom names can make assets and generated spritesheets easier to find in your Roblox Create dashboard. For more details, see the [Meta Files reference](/tungsten/reference/meta-files/).

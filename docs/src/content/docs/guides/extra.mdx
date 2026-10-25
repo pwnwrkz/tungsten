@@ -1,0 +1,102 @@
+---
+title: Stuff about images and audio
+description: Learn how to use compression in Tungsten to reduce the size of your assets.
+---
+
+Remember back in the initialization chapter when the configuration part mentioned some things weren't there and it would be in it's own chapter? Well I kind of lied, it would just be in a megachapter (whatever I call it, this name is nice) where you would learn about image and audio functions!
+
+## The image chapter
+
+Tungsten has some really nice image tools that help make your life a bit easier and automated! Here's a few...
+
+### SVG Rasterization
+
+This is a feature that's really neat, and was *stol-* I mean **borrowed** from Asphalt (with some modifications), yes that's the word!...
+
+You can easily rasterize your assets by just adding your SVG assets into Tungsten and that's it, Tungsten will handle the rasterization when it detects SVGs, so you can just relax while it does the work for you.
+
+You can also control the scale of your SVGs when they are being rasterized using the `svg_scale` field in your input.
+
+```toml
+[inputs.images]
+path = "assets/images"
+output_path = "src/images.luau"
+svg_scale = 2.0 # SVGs will be 2 times the size!
+```
+
+### Alpha bleeding
+
+Sometimes, your assets might have just a little white or black outline on your sprites. And you might like it, but most of the time, you will not! This happens due to **bilinear interpolation**[^1], and it can be annoying. So you would alpha bleed your sprites, but it'll take a really, really, really long time to manually go a fix them one by one, especially if your project has a lot of assets.
+
+So Tungsten is here to save the day, with Tarmac's alpha bleeding algorithm (that's slightly modified) you can quickly bleed assets by... doing nothing! Wait what, do nothing? Yup, Tungsten already bleeds your images by default, but if you like your outlines you can declare in your input `bleed` set to false.
+
+```toml
+[inputs.images]
+path = "assets/images"
+output_path = "src/images.luau"
+bleed = false # Here!
+```
+
+### Compression
+
+Compression is one of the features which was suggested by RuizuKun-Dev, and it's quite a great feature to use!
+
+Compressing your assets can make your assets load faster, especially for large assets like backgrounds and high quality textures. And it also reduces the time needed when uploading the assets to Roblox.
+
+You can declare an input to be compressed by adding a new table that's your input name with a `compress_options` keyword behind it, like this:
+
+```toml
+[inputs.backgrounds.compress_options]
+jpeg_quality = 75
+png_quality = 50
+keep_metadata = false
+```
+
+Currently you can only compress images, if the images aren't in the JPEG nor PNG format they will be automatically converted to PNG before compression.
+
+There may be more conversion functions in the future, but this will depend if I want to add those features or not.
+
+## All about audio
+
+See that alliteration I just used? It's all "A"'s, haha! Okay let's stay on topic now shall we...
+
+### Transcoding to OGG Vorbis
+
+You can transcode your audio files over to the OGG Vorbis format automatically with Tungsten. Just add a `transcode` table to your audio input, and Tungsten will handle the conversion for you!
+
+Tungsten supports transcoding common formats like MP3, WAV, FLAC, M4A, and more to OGG Vorbis. If your files are already in OGG format, they'll be passed through untouched unless you're also normalizing them!
+
+You can control the quality by setting either `vorbis_quality` (on the -1.0 to 10.0 scale) or `bitrate` in kbps:
+
+```toml
+[inputs.music]
+path = "assets/music"
+output_path = "src/music.luau"
+
+[inputs.music.transcode]
+vorbis_quality = 5.0 # ~160 kbps stereo
+```
+
+### Normalizing your audio
+
+Sometimes in games you might put your volume ***way*** louder because you really can't hear a single thing it's playing, but then one sound suddenly makes your ears **explode** due to it being way louder than the other sounds! You don't want that to happen to your players, right? So Tungsten can handle audio normalization for you!
+
+Tungsten uses **EBU R128** loudness normalization (ITU-R BS.1770-4) to make all of your audio files have a consistent loudness. This way, quiet sounds stay audible and loud sounds won't blow your ears out!
+
+Enabling normalization is super easy! Just add a `[inputs.<name>.normalize]` table to your input in `tungsten.toml`:
+
+```toml
+[inputs.sounds]
+path = "assets/sounds"
+output_path = "src/sounds.luau"
+
+[inputs.sounds.normalize]
+target_lufs = -14.0 # Standard streaming loudness target
+true_peak_ceiling = -1.0 # Prevent clipping
+```
+
+When you enable normalization, Tungsten will automatically decode and re-encode your audio to OGG Vorbis (even if the files are already OGG). You can tweak `target_lufs` and `true_peak_ceiling` to fit your game's needs!
+
+---
+
+[^1]: Don't worry I have no idea what this is either.

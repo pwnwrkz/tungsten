@@ -1,29 +1,42 @@
-@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap");
+@import url("https://cdn.jsdelivr.net/npm/@github/mona-sans@1.0.1/dist/Mona-Sans.css");
 
 @font-face {
-    font-family: "Mona Sans Bold";
-    src: url("../assets/fonts/MonaSansExpanded-Bold.ttf") format("truetype");
-    font-style: normal;
-}
-
-@font-face {
-    font-family: "Mona Sans";
-    src: url("../assets/fonts/MonaSansExpanded-Regular.ttf") format("truetype");
+    font-family: "Sysfont";
+    src: url("../assets/fonts/sysfont.woff2");
     font-style: normal;
 }
 
 :root {
-    --sl-font: "Mona Sans", sans-serif;
+    --sl-font: "Inter", sans-serif;
     --sl-font-mono: "JetBrains Mono", monospace;
+    --font-mono: "JetBrains Mono", monospace;
+
+    /* Tungsten logo palette (see src/assets/TungstenLogo.svg). */
+    --tungsten-charcoal: #2f343b;
+    --tungsten-slate: #485265;
+    --tungsten-lavender: #838cae;
+    --tungsten-periwinkle: #aebeda;
 }
 
-h1,
-h2,
-h3,
-h4,
-h5,
-h6 {
-    font-family: "Mona Sans Bold", sans-serif !important;
+/* Dark mode colors (default theme). */
+:root {
+    --sl-color-accent-low: #2b3345;
+    --sl-color-accent: #838cae;
+    --sl-color-accent-high: #aebeda;
+}
+
+/* Light mode colors. */
+:root[data-theme="light"] {
+    --sl-color-accent-low: #dde4f1;
+    --sl-color-accent: #485265;
+    --sl-color-accent-high: #2f343b;
+}
+
+.hero h1 {
+    font-family: "Mona Sans";
+    font-weight: 700;
+    font-stretch: 125%;
 }
 
 :root[data-theme="light"] .hero h1 {
@@ -32,4 +45,54 @@ h6 {
 
 :root[data-theme="dark"] .hero h1 {
     color: #aebeda;
+}
+
+/* Nova's LinkButton hardcodes Tailwind grays (bg-black / bg-white) instead of
+   --sl-color-accent, so theme it directly. Unlayered → beats Nova's layer. */
+.hero .actions a.bg-black {
+    background-color: var(--tungsten-periwinkle);
+    border-color: transparent;
+    color: var(--tungsten-charcoal);
+}
+
+.hero .actions a.bg-black:hover {
+    background-color: #c6d2e8;
+}
+
+.hero .actions a.bg-white {
+    background-color: transparent;
+    border-color: var(--tungsten-lavender);
+    color: var(--tungsten-periwinkle);
+}
+
+.hero .actions a.bg-white:hover {
+    background-color: rgb(131 140 174 / 0.15);
+}
+
+.sl-markdown-content .card-grid.stagger {
+    --stagger-height: 0;
+}
+
+#pwnwrkz {
+    font-family: "Sysfont";
+    color: white;
+}
+
+:root[data-theme="light"] .hero .actions a.bg-black {
+    background-color: var(--tungsten-charcoal);
+    color: #fff;
+}
+
+:root[data-theme="light"] .hero .actions a.bg-black:hover {
+    background-color: #212428;
+}
+
+:root[data-theme="light"] .hero .actions a.bg-white {
+    background-color: #fff;
+    border-color: var(--tungsten-lavender);
+    color: var(--tungsten-slate);
+}
+
+:root[data-theme="light"] .hero .actions a.bg-white:hover {
+    background-color: var(--sl-color-accent-low);
 }

@@ -1,0 +1,21 @@
+---
+import { TabItem } from "@astrojs/starlight/components";
+import { Icon } from "astro-icon/components";
+
+interface Props {
+	/** Text displayed in the tab. Must be unique within its tab group. */
+	label: string;
+	/** Name of an astro-icon icon (e.g. `"pkg/rokit"`) shown before the label. */
+	icon?: string;
+}
+
+const { label, icon } = Astro.props;
+---
+<TabItem label={label}>
+	<slot />
+	{icon && (
+		<span data-icontabs-icon={label} hidden>
+			<Icon name={icon} />
+		</span>
+	)}
+</TabItem>
